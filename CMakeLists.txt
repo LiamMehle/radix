@@ -1,13 +1,42 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(radix)
+find_package(catkin REQUIRED COMPONENTS roscpp )
+catkin_package()
+set(BIN_NAME "fotona_gui_node")
+add_compile_options(-std=c++11)
+include_directories(
+  ${catkin_INCLUDE_DIRS})
+add_executable(${BIN_NAME}
+  src/main.cpp
+  src/main_window.cpp)
 
+target_compile_features(${BIN_NAME} PRIVATE
+cxx_std_17
+cxx_template_template_parameters
+cxx_auto_type
+cxx_decltype
+cxx_defaulted_functions
+cxx_defaulted_move_initializers
+cxx_delegating_constructors
+cxx_deleted_functions
+cxx_explicit_conversions
+cxx_lambdas
+cxx_noexcept
+cxx_nullptr
+cxx_rvalue_references
+cxx_trailing_return_types
+cxx_generic_lambdas
+cxx_lambda_init_captures
+)
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(${BIN_NAME} PUBLIC OpenMP::OpenMP_CXX)
+endif()
 ## Compile as C++11, supported in ROS Kinetic and newer
-# add_compile_options(-std=c++11)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
-find_package(catkin REQUIRED)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)

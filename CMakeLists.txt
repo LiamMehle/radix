@@ -2,13 +2,28 @@ cmake_minimum_required(VERSION 3.0.2)
 project(radix)
 find_package(catkin REQUIRED COMPONENTS roscpp )
 catkin_package()
-set(BIN_NAME "fotona_gui_node")
-add_compile_options(-std=c++11)
+
+set(OpenGL_GL_PREFERENCE GLVND)
+
+find_package(GLEW REQUIRED)
+include_directories(${GLEW_INCLUDE_DIRS})
+link_libraries(${GLEW_LIBRARIES})
+
+find_package(glfw3 3.3 REQUIRED)
+link_libraries(glfw)
+
+find_package(OpenGL 3.3 REQUIRED)
+include_directories(${OPENGL_INCLUDE_DIR})
+link_libraries(${OPENGL_LIBRARIES})
+
+set(BIN_NAME "radix_node")
+add_compile_options("-O0")
+add_compile_options("-g")
+add_compile_options("-std=c++2a")
 include_directories(
   ${catkin_INCLUDE_DIRS})
 add_executable(${BIN_NAME}
-  src/main.cpp
-  src/main_window.cpp)
+  src/main.cpp)
 
 target_compile_features(${BIN_NAME} PRIVATE
 cxx_std_17

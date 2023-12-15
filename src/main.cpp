@@ -1,7 +1,7 @@
 #include <cstdio>
-#include <GL/glew.h>
-#include <GLFW/glfw3.h>
 #include <cstdint>
+#include "gl.h"
+#include "raii.cpp"
 
 constexpr size_t WIDTH  = 800;
 constexpr size_t HEIGHT = 600;
@@ -9,44 +9,6 @@ constexpr size_t HEIGHT = 600;
 void error_callback(int, const char* err_str) {
     printf("GLFW Error: %s\n", err_str);
 }
-
-class VAO {
-private:
-    GLuint vao;
-public:
-    VAO() { glCreateVertexArrays(1, &this->vao); }
-    VAO(GLuint const& other) { this->vao = other; }
-    VAO(const VAO &) = default;
-    ~VAO() { glDeleteVertexArrays(1, &vao); }
-    void operator=(VAO&) = delete;
-    void operator=(VAO&& other) { this->vao = other; };
-
-    operator GLuint() { return this->vao; }
-};
-
-class Window {
-private:
-    GLFWwindow* window;
-public:
-    Window(int width, int height, char const* const title, GLFWmonitor *monitor, GLFWwindow *share) {
-        window = glfwCreateWindow(width, height, title, monitor, share); }
-    Window(GLFWwindow *other) { this->window = other; }
-    Window(Window& other) = default;
-    ~Window() { glfwDestroyWindow(this->window); }
-    void operator=(Window&) = delete;
-    void operator=(Window&& other) { this->window = other; };
-
-    operator GLFWwindow*() const { return this->window; }
-};
-
-class GLFW {
-private:
-    int status;
-public:
-    GLFW() { this->status = glfwInit(); }
-    ~GLFW() { glfwTerminate(); }
-    operator int() { return this->status; }
-};
 
 int main() {
     int status = 0;
@@ -57,7 +19,7 @@ int main() {
         return 1;
     }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
@@ -81,7 +43,23 @@ int main() {
 
     glViewport(0, 0, frame_buffer_width, frame_buffer_height);
 
-    VAO vao = VAO();
+    GLfloat verticies[] = {
+        -1., -1., 0.,
+         1., -1., 0.,
+         0.,  1., 0.
+    };
+
+    VBO vbo{};
+    VAO vao{};
+
+    glBindVertexArray(vao);                                                       // bind configuration object: remembers the global (buffer) state
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           // bind the buffer to the slot for how it will be used
+    glBufferData(GL_ARRAY_BUFFER, sizeof(verticies), verticies, GL_STATIC_DRAW);  // send data to the gpu (with usage hints)
+    glVertexAttribPointer(0, 3, GL_FLOAT, false, 1, nullptr);                     // configure vbo metadata
+    glEnableVertexAttribArray(0);                                                 // enable the config
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);                                             // unbinding the buffers (safety?)
+    glBindVertexArray(0);                                                         //
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();

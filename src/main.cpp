@@ -16,6 +16,7 @@ private:
 public:
     VAO() { glCreateVertexArrays(1, &this->vao); }
     VAO(GLuint const& other) { this->vao = other; }
+    VAO(const VAO &) = default;
     ~VAO() { glDeleteVertexArrays(1, &vao); }
     void operator=(VAO&) = delete;
     void operator=(VAO&& other) { this->vao = other; };
@@ -30,11 +31,12 @@ public:
     Window(int width, int height, char const* const title, GLFWmonitor *monitor, GLFWwindow *share) {
         window = glfwCreateWindow(width, height, title, monitor, share); }
     Window(GLFWwindow *other) { this->window = other; }
+    Window(Window& other) = default;
     ~Window() { glfwDestroyWindow(this->window); }
-    void operator=(VAO&) = delete;
-    void operator=(VAO&& other) { this->window = other; };
+    void operator=(Window&) = delete;
+    void operator=(Window&& other) { this->window = other; };
 
-    operator GLFWwindow*() { return this->window; }
+    operator GLFWwindow*() const { return this->window; }
 };
 
 class GLFW {
@@ -42,17 +44,16 @@ private:
     int status;
 public:
     GLFW() { this->status = glfwInit(); }
-    GLFW() { this->status = glfwInit(); }
     ~GLFW() { glfwTerminate(); }
     operator int() { return this->status; }
-}
+};
 
 int main() {
     int status = 0;
     glfwSetErrorCallback(error_callback);
-    if (glfwInit() != GLFW_TRUE) {
+    GLFW glfw{};
+    if (glfw != GLFW_TRUE) {
         puts("failed to initialize glfw");
-        glfwTerminate();
         return 1;
     }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -75,13 +76,12 @@ int main() {
 
     if (glewInit() != GLEW_OK) {
         puts("failed to init glew");
-        status = 3;
-        goto window_fail;
+        return 3;
     }
 
     glViewport(0, 0, frame_buffer_width, frame_buffer_height);
 
-    VAO vao{};
+    VAO vao = VAO();
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();

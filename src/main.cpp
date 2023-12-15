@@ -1,5 +1,8 @@
 #include <cstdio>
 #include <cstdint>
+#include <cassert>
+#include <cstring>
+#include <vector>
 #include "gl.h"
 #include "raii.cpp"
 
@@ -8,6 +11,22 @@ constexpr size_t HEIGHT = 600;
 
 void error_callback(int, const char* err_str) {
     printf("GLFW Error: %s\n", err_str);
+}
+
+GLint compile_shader(char const* const src, GLenum const type) {
+    GLint shader = glCreateShader(type);
+    GLint success;
+    std::vector<GLchar> program_log(1024, 0);
+    GLint src_len = strlen(src);
+    glShaderSource(shader, 1, &src, &src_len);
+    glCompileShader(shader);
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        glGetShaderInfoLog(shader, program_log.size(), nullptr, program_log.data());
+        printf("[error]: %s\n", program_log.data());
+        return 0;
+    }
+    return shader;
 }
 
 int main() {
@@ -63,13 +82,13 @@ int main() {
     glBindVertexArray(0);                                                         //
 
     // shaders:
-    char const* const vertex_shader_src = "   \n\
+    GLchar const* const vertex_shader_src = "   \n\
 #version 330                              \n\
 layout (location=0) in vec3 pos;          \n\
 void main() {                             \n\
-    gl_Position = pos;                    \n\
+    gl_Position = vec4(pos, 1.);          \n\
 }                                         ";
-    char const* const fragment_shader_src = " \n\
+    GLchar const* const fragment_shader_src = " \n\
 #version 330                              \n\
 out vec4 color;                           \n\
 void main() {                             \n\
@@ -77,16 +96,30 @@ void main() {                             \n\
 }                                         ";
 
     Program program{};
-    Shader vertex_shader = Shader(GL_VERTEX_SHADER);
-    Shader vertex_shader = Shader(GL_FRAGMENT_SHADER);
+    Shader vertex_shader   = compile_shader(vertex_shader_src,   GL_VERTEX_SHADER);
+    Shader fragment_shader = compile_shader(fragment_shader_src, GL_FRAGMENT_SHADER);
+    if (!vertex_shader || !fragment_shader)
+        return 5;
+
+    glAttachShader(program, vertex_shader);
+    glAttachShader(program, fragment_shader);
+    glLinkProgram(program);
     
-    // add_shader(program, vertex_shader, GL_VERTEX_SHADER);
-    // add_shader(program, vertex_shader, GL_FRAGMENT_SHADER);
+    {
+        GLint result;
+        glGetProgramiv(program, GL_LINK_STATUS, &result);
+        if (!result) {
+            std::vector<GLchar> program_log(1024, 0);
+            glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
+            printf("[error]: --linker-- %s\n", program_log.data());
+            return 6;
+        }
+    }
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
-        glClearColor(0.f, 0.f, 0.f, 0.f);
+        glClearColor(.1f, .1f, .4f, 1.f);
         glClear(GL_COLOR_BUFFER_BIT);
 
         glfwSwapBuffers(window);

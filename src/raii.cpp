@@ -44,30 +44,30 @@ public:
 
 class Program {
 private:
-    GLuint program;
+    GLint program;
 public:
-    Program() {
-        program = glCreateProgram(); }
+    Program() { program = glCreateProgram(); }
+    Program(GLint other) { this->program = other; }
     Program(Program& other) = default;
     ~Program() { glDeleteProgram(this->program); }
-    void operator=(Program&) = delete;
     void operator=(Program&& other) { this->program = other; };
 
-    operator GLuint() const { return this->program; }
+    operator GLint() const { return this->program; }
 };
 
 class Shader {
 private:
-    GLuint program;
+    GLint program;
 public:
     Shader(GLenum type) {
         program = glCreateShader(type); }
+    Shader(GLint other) { this->program = other; }
     Shader(Shader& other) = default;
     ~Shader() { glDeleteShader(this->program); }
     void operator=(Shader&) = delete;
     void operator=(Shader&& other) { this->program = other; };
 
-    operator GLuint() const { return this->program; }
+    operator GLint() const { return this->program; }
 };
 
 class GLFW {

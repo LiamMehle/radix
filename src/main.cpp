@@ -75,10 +75,10 @@ int main() {
     glBindVertexArray(vao);                                                       // bind configuration object: remembers the global (buffer) state
     glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           // bind the buffer to the slot for how it will be used
     glBufferData(GL_ARRAY_BUFFER, sizeof(verticies), verticies, GL_STATIC_DRAW);  // send data to the gpu (with usage hints)
-    glVertexAttribPointer(0, 3, GL_FLOAT, false, 1, nullptr);                     // configure vbo metadata
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
     glEnableVertexAttribArray(0);                                                 // enable the config
 
-    glBindBuffer(GL_ARRAY_BUFFER, 0);                                             // unbinding the buffers (safety?)
+    // glBindBuffer(GL_ARRAY_BUFFER, 0);                                             // unbinding the buffers (safety?)
     glBindVertexArray(0);                                                         //
 
     // shaders:
@@ -92,7 +92,7 @@ void main() {                             \n\
 #version 330                              \n\
 out vec4 color;                           \n\
 void main() {                             \n\
-    color = vec4(3.f, 1.f, 5.f, 1.f);     \n\
+    color = vec4(4.f, 2.f, 8.f, 1.f);     \n\
 }                                         ";
 
     Program program{};
@@ -111,16 +111,32 @@ void main() {                             \n\
         if (!result) {
             std::vector<GLchar> program_log(1024, 0);
             glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
-            printf("[error]: --linker-- %s\n", program_log.data());
+            printf("[error]: %s\n", program_log.data());
+            return 6;
+        }
+        glValidateProgram(program);
+        glGetProgramiv(program, GL_LINK_STATUS, &result);
+        if (!result) {
+            std::vector<GLchar> program_log(1024, 0);
+            glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
+            printf("[error]: %s\n", program_log.data());
             return 6;
         }
     }
 
+    // enable vsync if present:
+    glfwSwapInterval(1);
+
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
-        glClearColor(.1f, .1f, .4f, 1.f);
+        glClearColor(.1f, .1f, .1f, 5.f);
         glClear(GL_COLOR_BUFFER_BIT);
+
+        glUseProgram(program);
+        glBindVertexArray(vao);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBindVertexArray(0);
 
         glfwSwapBuffers(window);
     }

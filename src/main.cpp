@@ -49,6 +49,7 @@ int main() {
          0.,  1., 0.
     };
 
+    // buffers:
     VBO vbo{};
     VAO vao{};
 
@@ -60,6 +61,27 @@ int main() {
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);                                             // unbinding the buffers (safety?)
     glBindVertexArray(0);                                                         //
+
+    // shaders:
+    char const* const vertex_shader_src = "   \n\
+#version 330                              \n\
+layout (location=0) in vec3 pos;          \n\
+void main() {                             \n\
+    gl_Position = pos;                    \n\
+}                                         ";
+    char const* const fragment_shader_src = " \n\
+#version 330                              \n\
+out vec4 color;                           \n\
+void main() {                             \n\
+    color = vec4(3.f, 1.f, 5.f, 1.f);     \n\
+}                                         ";
+
+    Program program{};
+    Shader vertex_shader = Shader(GL_VERTEX_SHADER);
+    Shader vertex_shader = Shader(GL_FRAGMENT_SHADER);
+    
+    // add_shader(program, vertex_shader, GL_VERTEX_SHADER);
+    // add_shader(program, vertex_shader, GL_FRAGMENT_SHADER);
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();

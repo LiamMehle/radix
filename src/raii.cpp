@@ -42,6 +42,34 @@ public:
     operator GLFWwindow*() const { return this->window; }
 };
 
+class Program {
+private:
+    GLuint program;
+public:
+    Program() {
+        program = glCreateProgram(); }
+    Program(Program& other) = default;
+    ~Program() { glDeleteProgram(this->program); }
+    void operator=(Program&) = delete;
+    void operator=(Program&& other) { this->program = other; };
+
+    operator GLuint() const { return this->program; }
+};
+
+class Shader {
+private:
+    GLuint program;
+public:
+    Shader(GLenum type) {
+        program = glCreateShader(type); }
+    Shader(Shader& other) = default;
+    ~Shader() { glDeleteShader(this->program); }
+    void operator=(Shader&) = delete;
+    void operator=(Shader&& other) { this->program = other; };
+
+    operator GLuint() const { return this->program; }
+};
+
 class GLFW {
 private:
     int status;

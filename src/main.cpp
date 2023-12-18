@@ -13,8 +13,8 @@ void error_callback(int, const char* err_str) {
     printf("GLFW Error: %s\n", err_str);
 }
 
-GLint compile_shader(char const* const src, GLenum const type) {
-    GLint shader = glCreateShader(type);
+Shader compile_shader(char const* const src, GLenum const type) {
+    Shader shader(type);
     GLint success;
     std::vector<GLchar> program_log(1024, 0);
     GLint src_len = strlen(src);

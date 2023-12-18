@@ -1,4 +1,5 @@
 #include "gl.h"
+#include "utils.hpp"
 
 class VAO {
 private:
@@ -57,17 +58,13 @@ public:
 
 class Shader {
 private:
-    GLint program;
+    GLint shader;
 public:
-    Shader(GLenum type) {
-        program = glCreateShader(type); }
-    Shader(GLint other) { this->program = other; }
-    Shader(Shader& other) = default;
-    ~Shader() { glDeleteShader(this->program); }
-    void operator=(Shader&) = delete;
-    void operator=(Shader&& other) { this->program = other; };
+    Shader(GLenum type) { shader = glCreateShader(type); }
+    Shader(Shader&& other) { this->shader = 0; swap(this->shader, other.shader); }
+    ~Shader() { glDeleteShader(this->shader); }
 
-    operator GLint() const { return this->program; }
+    operator GLint() const { return this->shader; }
 };
 
 class GLFW {

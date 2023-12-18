@@ -34,11 +34,9 @@ private:
 public:
     Window(int width, int height, char const* const title, GLFWmonitor *monitor, GLFWwindow *share) {
         window = glfwCreateWindow(width, height, title, monitor, share); }
-    Window(GLFWwindow *other) { this->window = other; }
-    Window(Window& other) = default;
+    Window(Window* other)  { this->window = window; }
+    Window(Window&& other) { this->window = nullptr; swap(this->window, window); }
     ~Window() { glfwDestroyWindow(this->window); }
-    void operator=(Window&) = delete;
-    void operator=(Window&& other) { this->window = other; };
 
     operator GLFWwindow*() const { return this->window; }
 };

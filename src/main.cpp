@@ -49,6 +49,10 @@ Shader compile_shader(char const* const src, GLenum const type) {
     return shader;
 }
 
+enum Direction {
+    Left, Right
+};
+
 int main() {
     int status = 0;
     glfwSetErrorCallback(error_callback);
@@ -98,11 +102,10 @@ int main() {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
     glEnableVertexAttribArray(0);                                                 // enable the config
 
-    // glBindBuffer(GL_ARRAY_BUFFER, 0);                                             // unbinding the buffers (safety?)
-    glBindVertexArray(0);                                                         //
+    glBindVertexArray(0);                                                         // unbinding the buffers (safety?)
 
     // shaders:
-    auto const vertex_shader_path = binary_path + "/vertex.glsl";
+    auto const vertex_shader_path   = binary_path + "/vertex.glsl";
     auto const fragment_shader_path = binary_path + "/fragment.glsl";
     std::string vertex_shader_src = read_file(vertex_shader_path.c_str());
     std::string fragment_shader_src = read_file(fragment_shader_path.c_str());
@@ -116,7 +119,7 @@ int main() {
     glAttachShader(program, vertex_shader);
     glAttachShader(program, fragment_shader);
     glLinkProgram(program);
-    
+
     {
         GLint result;
         glGetProgramiv(program, GL_LINK_STATUS, &result);
@@ -136,17 +139,28 @@ int main() {
         }
     }
 
+    GLint const x_offset_uniform = glGetUniformLocation(program, "x_offset");
+
     // enable vsync if present:
     glfwSwapInterval(1);
-
+    Direction movement_direction = Left;
+    float triangle_offset = 0;
+    float constexpr triangle_max_offset = 0.7;
+    float constexpr triangle_increment = 0.005;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
+
+        if (abs(triangle_offset) + triangle_increment > triangle_max_offset)
+            movement_direction = movement_direction == Right ? Left : Right;
+
+        triangle_offset += movement_direction == Right ? triangle_increment : -triangle_increment;
 
         glClearColor(.1f, .1f, .1f, 5.f);
         glClear(GL_COLOR_BUFFER_BIT);       
 
         glUseProgram(program);
         glBindVertexArray(vao);
+        glUniform1f(x_offset_uniform, triangle_offset);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         glBindVertexArray(0);
 

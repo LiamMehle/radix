@@ -47,11 +47,9 @@ class Program {
 private:
     GLint program;
 public:
-    Program() { program = glCreateProgram(); }
-    Program(GLint other) { this->program = other; }
-    Program(Program& other) = default;
+    Program() { this->program = glCreateProgram(); }
+    Program(Program&& other) { this->program = 0; swap(this->program, other.program); }
     ~Program() { glDeleteProgram(this->program); }
-    void operator=(Program&& other) { this->program = other; };
 
     operator GLint() const { return this->program; }
 };
@@ -60,7 +58,7 @@ class Shader {
 private:
     GLint shader;
 public:
-    Shader(GLenum type) { shader = glCreateShader(type); }
+    Shader(GLenum type) { this->shader = glCreateShader(type); }
     Shader(Shader&& other) { this->shader = 0; swap(this->shader, other.shader); }
     ~Shader() { glDeleteShader(this->shader); }
 

@@ -1,16 +1,36 @@
+#define __cplusplus 202003L
 #include <cstdio>
 #include <cstdint>
 #include <cassert>
 #include <cstring>
+#include <string>
 #include <vector>
+#include <filesystem>
+#include <fstream>
+#include <optional>
 #include "gl.h"
+#include "utils.hpp"
 #include "raii.cpp"
-
 constexpr size_t WIDTH  = 800;
 constexpr size_t HEIGHT = 600;
 
 void error_callback(int, const char* err_str) {
     printf("GLFW Error: %s\n", err_str);
+}
+
+namespace fs = std::filesystem;
+std::string binary_path = fs::canonical("/proc/self/exe").parent_path();
+std::string read_file(char const* const path) {
+
+    // Open the file using ifstream
+    std::ifstream file_stream(path);
+    std::stringstream buffer;
+    if (file_stream.is_open()) {
+        buffer << file_stream.rdbuf();
+        file_stream.close();
+    } else
+        printf("[error]:failed to read file: %s\n", path);
+    return buffer.str();
 }
 
 Shader compile_shader(char const* const src, GLenum const type) {
@@ -82,22 +102,14 @@ int main() {
     glBindVertexArray(0);                                                         //
 
     // shaders:
-    GLchar const* const vertex_shader_src = "   \n\
-#version 330                              \n\
-layout (location=0) in vec3 pos;          \n\
-void main() {                             \n\
-    gl_Position = vec4(pos, 1.);          \n\
-}                                         ";
-    GLchar const* const fragment_shader_src = " \n\
-#version 330                              \n\
-out vec4 color;                           \n\
-void main() {                             \n\
-    color = vec4(4.f, 2.f, 8.f, 1.f);     \n\
-}                                         ";
+    auto const vertex_shader_path = binary_path + "/vertex.glsl";
+    auto const fragment_shader_path = binary_path + "/fragment.glsl";
+    std::string vertex_shader_src = read_file(vertex_shader_path.c_str());
+    std::string fragment_shader_src = read_file(fragment_shader_path.c_str());
 
     Program program{};
-    Shader vertex_shader   = compile_shader(vertex_shader_src,   GL_VERTEX_SHADER);
-    Shader fragment_shader = compile_shader(fragment_shader_src, GL_FRAGMENT_SHADER);
+    Shader vertex_shader   = compile_shader(vertex_shader_src.c_str(),   GL_VERTEX_SHADER);
+    Shader fragment_shader = compile_shader(fragment_shader_src.c_str(), GL_FRAGMENT_SHADER);
     if (!vertex_shader || !fragment_shader)
         return 5;
 
@@ -131,7 +143,7 @@ void main() {                             \n\
         glfwPollEvents();
 
         glClearColor(.1f, .1f, .1f, 5.f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT);       
 
         glUseProgram(program);
         glBindVertexArray(vao);

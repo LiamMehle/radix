@@ -1,3 +1,4 @@
+#undef  __cplusplus
 #define __cplusplus 202003L
 #include <cstdio>
 #include <cstdint>

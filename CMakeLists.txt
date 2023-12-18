@@ -16,6 +16,10 @@ find_package(OpenGL 3.3 REQUIRED)
 include_directories(${OPENGL_INCLUDE_DIR})
 link_libraries(${OPENGL_LIBRARIES})
 
+find_package(glm REQUIRED)
+include_directories(glm::glm)
+link_libraries(glm::glm)
+
 set(BIN_NAME "radix_node")
 set(CMAKE_BINARY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)

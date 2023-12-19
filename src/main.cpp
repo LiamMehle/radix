@@ -170,20 +170,25 @@ int main() {
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
+        // logic
         if (abs(triangle_offset) + triangle_increment > triangle_max_offset)
             movement_direction = movement_direction == Right ? Left : Right;
 
         triangle_offset += movement_direction == Right ? triangle_increment : -triangle_increment;
 
+        // clear screen
         glClearColor(.1f, .1f, .1f, 5.f);
         glClear(GL_COLOR_BUFFER_BIT);       
 
+        // draw call
         glUseProgram(program);
         glBindVertexArray(vao);
         glUniform1f(x_offset_uniform, triangle_offset);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         glBindVertexArray(0);
         glfwSwapBuffers(window);
+
+        // rate control
         auto const t1 = std::chrono::high_resolution_clock::now();
         printf("%li ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(t1-t0).count());
         usleep(max(0l, target_frametime-std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count()));

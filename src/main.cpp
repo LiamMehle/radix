@@ -48,12 +48,13 @@ std::string read_file(char const* const path) {
     return buffer.str();
 }
 
-Shader compile_shader(char const* const src, GLenum const type) {
+Shader compile_shader(std::string const& src, GLenum const type) {
     Shader shader(type);
     GLint success;
     std::vector<GLchar> program_log(1024, 0);
-    GLint src_len = strlen(src);
-    glShaderSource(shader, 1, &src, &src_len);
+    auto source_ptr = src.c_str();
+    auto source_len = src.size();
+    glShaderSource(shader, 1, reinterpret_cast<GLchar const**>(&source_ptr), reinterpret_cast<GLint const*>(&source_len));
     glCompileShader(shader);
     glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
     if (!success) {
@@ -87,6 +88,7 @@ void ros_event_loop(int argc, char** const argv, Window const& window) {
         if (ros_not_ok_notify_flag && !ros::ok()) {
             puts("ros::ok() == false");
             ros_not_ok_notify_flag = true;
+            // todo: retry making a new NodeHandle and reinitialize ros
         }
 
         ros::spinOnce();
@@ -157,8 +159,8 @@ int main(int argc, char** const argv) {
     std::string fragment_shader_src = read_file(fragment_shader_path.c_str());
 
     Program program{};
-    Shader vertex_shader   = compile_shader(vertex_shader_src.c_str(),   GL_VERTEX_SHADER);
-    Shader fragment_shader = compile_shader(fragment_shader_src.c_str(), GL_FRAGMENT_SHADER);
+    Shader vertex_shader   = compile_shader(vertex_shader_src,   GL_VERTEX_SHADER);
+    Shader fragment_shader = compile_shader(fragment_shader_src, GL_FRAGMENT_SHADER);
     if (!vertex_shader || !fragment_shader)
         return 5;
 
@@ -181,7 +183,7 @@ int main(int argc, char** const argv) {
             std::vector<GLchar> program_log(1024, 0);
             glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
             printf("[error]: %s\n", program_log.data());
-            return 6;
+            return 7;
         }
     }
 
@@ -206,6 +208,7 @@ int main(int argc, char** const argv) {
 
         triangle_offset += movement_direction == Right ? triangle_increment : -triangle_increment;
 
+        // ----------- drawing -----------
         // clear screen
         glClearColor(.1f, .1f, .1f, 5.f);
         glClear(GL_COLOR_BUFFER_BIT);       

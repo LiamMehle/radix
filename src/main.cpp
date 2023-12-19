@@ -8,12 +8,18 @@
 #include <vector>
 #include <filesystem>
 #include <fstream>
-#include <optional>
+#include <unistd.h>
 #include "gl.h"
 #include "utils.hpp"
 #include "raii.cpp"
 constexpr size_t WIDTH  = 800;
 constexpr size_t HEIGHT = 600;
+
+template<typename T>
+static inline constexpr
+auto max(T const a, T const b) -> T {
+    return a > b ? a : b;
+}
 
 void error_callback(int, const char* err_str) {
     printf("GLFW Error: %s\n", err_str);
@@ -50,6 +56,16 @@ Shader compile_shader(char const* const src, GLenum const type) {
     return shader;
 }
 
+// sets the vsync state to the boolean passed in
+// returns true on success
+bool set_vsync(bool const enabled) {
+    GLubyte const * const extensions = glGetString(GL_EXTENSIONS);
+    if (extensions == nullptr)
+        return false;
+    puts(reinterpret_cast<char const* const>(extensions));
+    return false;
+}
+
 enum Direction {
     Left, Right
 };
@@ -77,6 +93,7 @@ int main() {
     glfwGetFramebufferSize(window, &frame_buffer_width, &frame_buffer_height);
 
     glfwMakeContextCurrent(window);
+    glfwSwapInterval(1);
 
     glewExperimental = GL_TRUE;
 
@@ -143,11 +160,13 @@ int main() {
     GLint const x_offset_uniform = glGetUniformLocation(program, "x_offset");
 
     // enable vsync if present:
-    glfwSwapInterval(1);
+    set_vsync(true);
     Direction movement_direction = Left;
     float triangle_offset = 0;
     float constexpr triangle_max_offset = 0.7;
     float constexpr triangle_increment = 0.005;
+    int constexpr target_frametime = 1000000/60;
+    auto t0 = std::chrono::high_resolution_clock::now();
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
@@ -164,8 +183,11 @@ int main() {
         glUniform1f(x_offset_uniform, triangle_offset);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         glBindVertexArray(0);
-
         glfwSwapBuffers(window);
+        auto const t1 = std::chrono::high_resolution_clock::now();
+        printf("%li ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(t1-t0).count());
+        usleep(max(0l, target_frametime-std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count()));
+        t0 = std::chrono::high_resolution_clock::now();
     }
 
     return 0;

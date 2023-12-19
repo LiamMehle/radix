@@ -22,16 +22,19 @@ link_libraries(glm::glm)
 
 set(BIN_NAME "radix_node")
 set(CMAKE_BINARY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
-add_compile_options("-O0")
+# set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
+# set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
+# set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
+add_compile_options("-Ofast")
 add_compile_options("-g")
 add_compile_options("-std=c++2a")
 include_directories(
-  ${catkin_INCLUDE_DIRS})
+  ${catkin_INCLUDE_DIRS}
+  ${Boost_INCLUDE_DIR})
 add_executable(${BIN_NAME}
   src/main.cpp)
+target_link_libraries(${BIN_NAME} PRIVATE
+  ${catkin_LIBRARIES})
 
 target_compile_features(${BIN_NAME} PRIVATE
 cxx_std_17

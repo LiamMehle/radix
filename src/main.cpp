@@ -6,20 +6,28 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <thread>
 #include <filesystem>
 #include <fstream>
 #include <unistd.h>
+#include "ros/ros.h"
+#include "sensor_msgs/PointCloud2.h"
 #include "gl.h"
 #include "utils.hpp"
 #include "raii.cpp"
+
 constexpr size_t WIDTH  = 800;
 constexpr size_t HEIGHT = 600;
 
+/*
+    Base rate at which everything refreshes
+    This program is based on polling. This is the base rate, mainly setting the rate a which the display refreshes.
+*/
+constexpr int global_base_rate = 60;
+
 template<typename T>
 static inline constexpr
-auto max(T const a, T const b) -> T {
-    return a > b ? a : b;
-}
+auto max(T const a, T const b) -> T { return a > b ? a : b; }
 
 void error_callback(int, const char* err_str) {
     printf("GLFW Error: %s\n", err_str);
@@ -70,7 +78,24 @@ enum Direction {
     Left, Right
 };
 
-int main() {
+void ros_event_loop(int argc, char** const argv, Window const& window) {
+    ros::init(argc, argv, "radix_node");
+    ros::NodeHandle n;
+    ros::Rate loop_rate(2*global_base_rate);
+    bool ros_not_ok_notify_flag = false;  // keeps track of wether a notification of ros failing was sent
+    while(!glfwWindowShouldClose(window)){
+        if (ros_not_ok_notify_flag && !ros::ok()) {
+            puts("ros::ok() == false");
+            ros_not_ok_notify_flag = true;
+        }
+
+        ros::spinOnce();
+        loop_rate.sleep();
+    }
+}
+
+int main(int argc, char** const argv) {
+    // initialize OpenGL
     int status = 0;
     glfwSetErrorCallback(error_callback);
     GLFW glfw{};
@@ -88,7 +113,10 @@ int main() {
         puts("failed to create a window");
         return 2;
     }
+    // start ros-related thread
+    std::thread ros_thread = std::thread([&]{ros_event_loop(argc, argv, window);});
 
+    // continue configuration of window/context
     int frame_buffer_width, frame_buffer_height;
     glfwGetFramebufferSize(window, &frame_buffer_width, &frame_buffer_height);
 
@@ -161,12 +189,14 @@ int main() {
 
     // enable vsync if present:
     set_vsync(true);
+
+    // logic
     Direction movement_direction = Left;
     float triangle_offset = 0;
     float constexpr triangle_max_offset = 0.7;
     float constexpr triangle_increment = 0.005;
-    int constexpr target_frametime = 1000000/60;
-    auto t0 = std::chrono::high_resolution_clock::now();
+    int constexpr target_frametime = 1000000/global_base_rate;
+    ros::Rate refresh_rate(global_base_rate);
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
@@ -188,11 +218,7 @@ int main() {
         glBindVertexArray(0);
         glfwSwapBuffers(window);
 
-        // rate control
-        auto const t1 = std::chrono::high_resolution_clock::now();
-        printf("%li ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(t1-t0).count());
-        usleep(max(0l, target_frametime-std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count()));
-        t0 = std::chrono::high_resolution_clock::now();
+        refresh_rate.sleep();
     }
 
     return 0;

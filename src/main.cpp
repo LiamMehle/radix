@@ -1,5 +1,6 @@
 #undef  __cplusplus
 #define __cplusplus 202003L
+#include <cstdint>
 #include <cstdio>
 #include <cstdint>
 #include <cassert>
@@ -223,8 +224,10 @@ int main(int argc, char** const argv) {
     float triangle_offset = 0;
     float constexpr triangle_max_offset = 0.7;
     float constexpr triangle_increment = 0.005;
-    int constexpr target_frametime = 1000000/global_base_rate;
-    auto t0 = std::chrono::high_resolution_clock::now();
+    using namespace std::chrono_literals;
+    auto constexpr target_frametime = (1000000us)/global_base_rate;
+    auto t0 = std::chrono::steady_clock::now();
+    auto sleep_duration_adjustment = 0us;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
@@ -247,9 +250,17 @@ int main(int argc, char** const argv) {
         glBindVertexArray(0);
         glfwSwapBuffers(window);
         glFinish();
-        auto const t1 = std::chrono::high_resolution_clock::now();
-        // printf("%li ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(t1-t0).count());
-        t0 = t1;
+        auto const t1 = std::chrono::steady_clock::now();
+        auto const time_elapsed_computing = std::chrono::duration_cast<std::chrono::microseconds>(t1-t0);
+        auto const time_to_sleep_for = target_frametime - time_elapsed_computing + (sleep_duration_adjustment/2);
+        usleep(max(static_cast<int64_t>(0), std::chrono::duration_cast<std::chrono::microseconds>(time_to_sleep_for).count()));
+        auto const t2 = std::chrono::steady_clock::now();
+        sleep_duration_adjustment    = target_frametime-std::chrono::duration_cast<std::chrono::microseconds>(t2-t0);
+        printf("logic_time: %li us\n", std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count());
+        printf("frame_time: %li us\n", std::chrono::duration_cast<std::chrono::microseconds>(t2-t0).count());
+        printf("adjustment: %li us\n", (sleep_duration_adjustment).count());
+        printf("---------------------\n");
+        t0 = t2;
     }
 
     return 0;

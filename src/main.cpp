@@ -250,15 +250,20 @@ int main(int argc, char** const argv) {
         glBindVertexArray(0);
         glfwSwapBuffers(window);
         glFinish();
+        // logic time end
         auto const t1 = std::chrono::steady_clock::now();
-        auto const time_elapsed_computing = std::chrono::duration_cast<std::chrono::microseconds>(t1-t0);
-        auto const time_to_sleep_for = target_frametime - time_elapsed_computing + (sleep_duration_adjustment/2);
+        auto const logic_time = std::chrono::duration_cast<std::chrono::microseconds>(t1-t0);
+        // adjustment is divided by 2 as a heuristic (avoid large +/- swings, effectively P from PID with factor of .5)
+        auto const time_to_sleep_for = target_frametime - logic_time + (sleep_duration_adjustment/2);
+        // max prevents underflow
         usleep(max(static_cast<int64_t>(0), std::chrono::duration_cast<std::chrono::microseconds>(time_to_sleep_for).count()));
+        // end of frame time (printing is not included, *though it should be*)
         auto const t2 = std::chrono::steady_clock::now();
-        sleep_duration_adjustment    = target_frametime-std::chrono::duration_cast<std::chrono::microseconds>(t2-t0);
-        printf("logic_time: %li us\n", std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count());
-        printf("frame_time: %li us\n", std::chrono::duration_cast<std::chrono::microseconds>(t2-t0).count());
-        printf("adjustment: %li us\n", (sleep_duration_adjustment).count());
+        auto const frametime = std::chrono::duration_cast<std::chrono::microseconds>(t2-t0);
+        sleep_duration_adjustment    = target_frametime-frametime;
+        printf("logic_time: %li us\n", logic_time.count());
+        printf("frame_time: %li us\n", frametime.count());
+        printf("adjustment: %li us\n", sleep_duration_adjustment.count());
         printf("---------------------\n");
         t0 = t2;
     }

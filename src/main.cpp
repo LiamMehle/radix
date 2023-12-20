@@ -48,8 +48,8 @@ std::string read_file(char const* const path) {
     return buffer.str();
 }
 
-Shader compile_shader(std::string const& src, GLenum const type) {
-    Shader shader(type);
+raii::Shader compile_shader(std::string const& src, GLenum const type) {
+    raii::Shader shader(type);
     GLint success;
     std::vector<GLchar> program_log(1024, 0);
     auto source_ptr = src.c_str();
@@ -65,22 +65,46 @@ Shader compile_shader(std::string const& src, GLenum const type) {
     return shader;
 }
 
+
+int x_error_handler(Display* display, XErrorEvent* event) {
+    puts("a");
+    return 0;
+}
+
 // sets the vsync state to the boolean passed in
 // returns true on success
 bool set_vsync(bool const enabled) {
-    GLubyte const * const extensions = glGetString(GL_EXTENSIONS);
-    if (extensions == nullptr)
+    typedef void (*glXSwapIntervalEXT_t)(Display *dpy, GLXDrawable drawable, int interval);
+    
+    Display* display = glXGetCurrentDisplay();
+    if (!display) {
+        printf("[error]: failed to open X display\n");
         return false;
-    puts(reinterpret_cast<char const* const>(extensions));
-    return false;
+    }
+
+    const char *glx_client_extensions = glXGetClientString(display, GLX_EXTENSIONS);
+    puts(glx_client_extensions);
+
+    glXSwapIntervalEXT_t glXSwapIntervalEXT = 
+        (glXSwapIntervalEXT_t)glXGetProcAddress((const GLubyte*)"glXSwapIntervalEXT");
+    if (glXSwapIntervalEXT == nullptr) {
+        printf("[error]: glXSwapIntervalEXT not found\n");
+
+        return false;
+    }
+
+    GLXDrawable drawable = glXGetCurrentDrawable();
+
+    glXSwapIntervalEXT(display, drawable, enabled ? 1 : 0);
+
+    return true;
 }
 
 enum Direction {
     Left, Right
 };
 
-void ros_event_loop(int argc, char** const argv, Window const& window) {
-    ros::init(argc, argv, "radix_node");
+void ros_event_loop(int argc, char** const argv, raii::Window const& window) {
     ros::NodeHandle n;
     ros::Rate loop_rate(2*global_base_rate);
     bool ros_not_ok_notify_flag = false;  // keeps track of wether a notification of ros failing was sent
@@ -97,33 +121,35 @@ void ros_event_loop(int argc, char** const argv, Window const& window) {
 }
 
 int main(int argc, char** const argv) {
+    ros::init(argc, argv, "radix_node");
     // initialize OpenGL
     int status = 0;
     glfwSetErrorCallback(error_callback);
-    GLFW glfw{};
+    raii::GLFW glfw{};
     if (glfw != GLFW_TRUE) {
         puts("failed to initialize glfw");
         return 1;
     }
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 4);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
-    Window window = Window(WIDTH, HEIGHT, "Radix", nullptr, nullptr);
+    raii::Window window = raii::Window(WIDTH, HEIGHT, "Radix", nullptr, nullptr);
     if (!static_cast<GLFWwindow*>(window)) {
         puts("failed to create a window");
         return 2;
     }
     // start ros-related thread
-    std::thread ros_thread = std::thread([&]{ros_event_loop(argc, argv, window);});
+    // std::thread ros_thread = std::thread([&]{ros_event_loop(argc, argv, window);});
 
     // continue configuration of window/context
     int frame_buffer_width, frame_buffer_height;
     glfwGetFramebufferSize(window, &frame_buffer_width, &frame_buffer_height);
 
     glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);
+    printf("vendor:   %s\n", reinterpret_cast<char const*>(glGetString(GL_VENDOR)));
+    printf("renderer: %s\n", reinterpret_cast<char const*>(glGetString(GL_RENDERER)));
 
     glewExperimental = GL_TRUE;
 
@@ -141,8 +167,8 @@ int main(int argc, char** const argv) {
     };
 
     // buffers:
-    VBO vbo{};
-    VAO vao{};
+    raii::VAO vao{};
+    raii::VBO vbo{};
 
     glBindVertexArray(vao);                                                       // bind configuration object: remembers the global (buffer) state
     glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           // bind the buffer to the slot for how it will be used
@@ -158,9 +184,9 @@ int main(int argc, char** const argv) {
     std::string vertex_shader_src = read_file(vertex_shader_path.c_str());
     std::string fragment_shader_src = read_file(fragment_shader_path.c_str());
 
-    Program program{};
-    Shader vertex_shader   = compile_shader(vertex_shader_src,   GL_VERTEX_SHADER);
-    Shader fragment_shader = compile_shader(fragment_shader_src, GL_FRAGMENT_SHADER);
+    raii::Program program{};
+    raii::Shader vertex_shader   = compile_shader(vertex_shader_src,   GL_VERTEX_SHADER);
+    raii::Shader fragment_shader = compile_shader(fragment_shader_src, GL_FRAGMENT_SHADER);
     if (!vertex_shader || !fragment_shader)
         return 5;
 
@@ -198,7 +224,7 @@ int main(int argc, char** const argv) {
     float constexpr triangle_max_offset = 0.7;
     float constexpr triangle_increment = 0.005;
     int constexpr target_frametime = 1000000/global_base_rate;
-    ros::Rate refresh_rate(global_base_rate);
+    auto t0 = std::chrono::high_resolution_clock::now();
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
@@ -220,8 +246,10 @@ int main(int argc, char** const argv) {
         glDrawArrays(GL_TRIANGLES, 0, 3);
         glBindVertexArray(0);
         glfwSwapBuffers(window);
-
-        refresh_rate.sleep();
+        glFinish();
+        auto const t1 = std::chrono::high_resolution_clock::now();
+        // printf("%li ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(t1-t0).count());
+        t0 = t1;
     }
 
     return 0;

@@ -1,4 +1,3 @@
-#include <cstdint>
 #include <cstdio>
 #include <cstdint>
 #include <cassert>
@@ -14,15 +13,12 @@
 #include "gl.h"
 #include "utils.hpp"
 #include "raii.cpp"
-
-constexpr size_t WIDTH  = 800;
-constexpr size_t HEIGHT = 600;
+#include "global_config.hpp"
 
 /*
     Base rate at which everything refreshes
     This program is based on polling. This is the base rate, mainly setting the rate a which the display refreshes.
 */
-constexpr int global_base_rate = 60;
 
 template<typename T>
 static inline constexpr

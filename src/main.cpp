@@ -1,5 +1,3 @@
-#undef  __cplusplus
-#define __cplusplus 202003L
 #include <cstdint>
 #include <cstdio>
 #include <cstdint>
@@ -11,8 +9,8 @@
 #include <filesystem>
 #include <fstream>
 #include <unistd.h>
-#include "ros/ros.h"
-#include "sensor_msgs/PointCloud2.h"
+#include <ros/ros.h>
+#include <sensor_msgs/PointCloud2.h>
 #include "gl.h"
 #include "utils.hpp"
 #include "raii.cpp"
@@ -53,7 +51,7 @@ raii::Shader compile_shader(std::string const& src, GLenum const type) {
     raii::Shader shader(type);
     GLint success;
     std::vector<GLchar> program_log(1024, 0);
-    auto source_ptr = src.c_str();
+    auto source_ptr = src.c_str();  
     auto source_len = src.size();
     glShaderSource(shader, 1, reinterpret_cast<GLchar const**>(&source_ptr), reinterpret_cast<GLint const*>(&source_len));
     glCompileShader(shader);

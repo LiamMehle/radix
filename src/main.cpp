@@ -154,7 +154,7 @@ int main(int argc, char** const argv) {
     glBindVertexArray(vao);                                                       // bind configuration object: remembers the global (buffer) state
     glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           // bind the buffer to the slot for how it will be used
     // glBufferData(GL_ARRAY_BUFFER, sizeof(verticies), verticies, GL_STATIC_DRAW);  // send data to the gpu (with usage hints)
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_TRUE, 0, 0);                         // configure vbo metadata
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
     glEnableVertexAttribArray(0);                                                 // enable the config
 
     glBindVertexArray(0);                                                         // unbinding the buffers (safety?)
@@ -242,6 +242,13 @@ int main(int argc, char** const argv) {
                 triangle_vertex_2[0] = x+.1;
                 triangle_vertex_2[1] = y;
                 triangle_vertex_2[2] = z;
+                x_max = max(x_max, abs(x));
+                y_max = max(y_max, abs(y));
+            }
+            {
+                auto const temp = max(x_max, y_max);
+                x_max = temp;
+                y_max = temp;
             }
             point_cloud_mutex.unlock();
             // for (size_t i=0; i<point_cloud_triangles.size(); i+=3) {
@@ -249,14 +256,15 @@ int main(int argc, char** const argv) {
             //     vertex_ptr[0] *= 1/x_max;
             //     vertex_ptr[1] *= 1/y_max;
             // }
-            glBufferData(GL_ARRAY_BUFFER, point_cloud_triangles.size()*sizeof(point_cloud_triangles[0]), point_cloud_triangles.data(), GL_STREAM_DRAW);
+            auto const triangle_count = point_cloud_triangles.size()/3;
+            auto const triangle_buffer_size = triangle_count * 3 * sizeof(point_cloud_triangles[0]);
+            glBufferData(GL_ARRAY_BUFFER, triangle_buffer_size, point_cloud_triangle_ptr, GL_STREAM_DRAW);
             printf("x_max: %f\n", x_max);
             printf("y_max: %f\n", y_max);
-            glFinish();
         // }
-        glUniform1f(x_max_uniform_handle, x_max_uniform_handle);
-        glUniform1f(y_max_uniform_handle, y_max_uniform_handle);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glUniform1f(x_max_uniform_handle, x_max);
+        glUniform1f(y_max_uniform_handle, y_max);
+        glDrawArrays(GL_TRIANGLES, 0, triangle_count);
         glBindVertexArray(0);
         glfwSwapBuffers(window);
         glFinish();

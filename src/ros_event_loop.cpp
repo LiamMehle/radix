@@ -6,6 +6,7 @@ std::condition_variable point_cloud_updated;
 std::mutex              point_cloud_mutex;
 std::vector<float>      point_cloud_points;  // todo-perf: left-right instead of single lock
 
+#pragma pack(1)
 struct CloudPoint {
     float x, y, z;
     uint32_t noise;
@@ -21,9 +22,12 @@ void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
         auto const point_array = reinterpret_cast<CloudPoint*>(cloud_msg.data.data());
         size_t const point_count = cloud_msg.data.size()/sizeof(CloudPoint);
         for (size_t i=0; i<point_count; i++) {
-            point_cloud_points.push_back(point_array[i].x);
-            point_cloud_points.push_back(point_array[i].y);
-            point_cloud_points.push_back(point_array[i].z);
+            auto const x = point_array[i].x;
+            auto const y = point_array[i].y;
+            auto const z = point_array[i].z;
+            point_cloud_points.push_back(x);
+            point_cloud_points.push_back(y);
+            point_cloud_points.push_back(z);
         }
     }
     point_cloud_updated.notify_all();

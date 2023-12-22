@@ -28,15 +28,17 @@ set(CMAKE_BINARY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/bin)
 # set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
 # set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
-add_compile_options("-O0")
+add_compile_options("-Ofast")
 add_compile_options("-g")
+add_compile_options("-march=native")
 add_compile_options("-std=c++2a")
 add_link_options("-lX11")
 include_directories(
   ${catkin_INCLUDE_DIRS}
   ${Boost_INCLUDE_DIR})
 add_executable(${BIN_NAME}
-  src/main.cpp)
+  src/main.cpp
+  src/ros_event_loop.cpp)
 target_link_libraries(${BIN_NAME} PRIVATE
   ${catkin_LIBRARIES})
 

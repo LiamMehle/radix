@@ -1,3 +1,4 @@
+#pragma once
 #include "gl.h"
 #include "utils.hpp"
 namespace raii {

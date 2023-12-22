@@ -14,6 +14,7 @@
 #include "utils.hpp"
 #include "raii.cpp"
 #include "global_config.hpp"
+#include "ros_event_loop.hpp"
 
 /*
     Base rate at which everything refreshes
@@ -23,6 +24,9 @@
 template<typename T>
 static inline constexpr
 auto max(T const a, T const b) -> T { return a > b ? a : b; }
+template<typename T>
+static inline constexpr
+auto abs(T const a) -> T { return a >= 0 ? a : -a; }
 
 void error_callback(int, const char* err_str) {
     printf("GLFW Error: %s\n", err_str);
@@ -43,6 +47,7 @@ std::string read_file(char const* const path) {
     return buffer.str();
 }
 
+static
 raii::Shader compile_shader(std::string const& src, GLenum const type) {
     raii::Shader shader(type);
     GLint success;
@@ -60,7 +65,7 @@ raii::Shader compile_shader(std::string const& src, GLenum const type) {
     return shader;
 }
 
-
+static
 int x_error_handler(Display* display, XErrorEvent* event) {
     puts("a");
     return 0;
@@ -68,6 +73,7 @@ int x_error_handler(Display* display, XErrorEvent* event) {
 
 // sets the vsync state to the boolean passed in
 // returns true on success
+static
 bool set_vsync(bool const enabled) {
     typedef void (*glXSwapIntervalEXT_t)(Display *dpy, GLXDrawable drawable, int interval);
     
@@ -99,8 +105,6 @@ enum Direction {
     Left, Right
 };
 
-
-
 int main(int argc, char** const argv) {
     ros::init(argc, argv, "radix_node");
     // initialize OpenGL
@@ -121,8 +125,9 @@ int main(int argc, char** const argv) {
         puts("failed to create a window");
         return 2;
     }
+
     // start ros-related thread
-    // std::thread ros_thread = std::thread([&]{ros_event_loop(argc, argv, window);});
+    std::thread ros_thread = std::thread([&]{ros_event_loop(argc, argv, window);});
 
     // continue configuration of window/context
     int frame_buffer_width, frame_buffer_height;
@@ -141,20 +146,15 @@ int main(int argc, char** const argv) {
 
     glViewport(0, 0, frame_buffer_width, frame_buffer_height);
 
-    GLfloat verticies[] = {
-        -1., -1., 0.,
-         1., -1., 0.,
-         0.,  1., 0.
-    };
-
+    // todo-perf: compute shader to expand compressed version of the data
     // buffers:
     raii::VAO vao{};
     raii::VBO vbo{};
 
     glBindVertexArray(vao);                                                       // bind configuration object: remembers the global (buffer) state
     glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           // bind the buffer to the slot for how it will be used
-    glBufferData(GL_ARRAY_BUFFER, sizeof(verticies), verticies, GL_STATIC_DRAW);  // send data to the gpu (with usage hints)
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
+    // glBufferData(GL_ARRAY_BUFFER, sizeof(verticies), verticies, GL_STATIC_DRAW);  // send data to the gpu (with usage hints)
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_TRUE, 0, 0);                         // configure vbo metadata
     glEnableVertexAttribArray(0);                                                 // enable the config
 
     glBindVertexArray(0);                                                         // unbinding the buffers (safety?)
@@ -194,28 +194,18 @@ int main(int argc, char** const argv) {
         }
     }
 
-    GLint const x_offset_uniform = glGetUniformLocation(program, "x_offset");
+    GLint const x_max_uniform_handle = glGetUniformLocation(program, "x_max");
+    GLint const y_max_uniform_handle = glGetUniformLocation(program, "x_max");
 
     // enable vsync if present:
     set_vsync(true);
 
-    // logic
-    Direction movement_direction = Left;
-    float triangle_offset = 0;
-    float constexpr triangle_max_offset = 0.7;
-    float constexpr triangle_increment = 0.005;
     using namespace std::chrono_literals;
     auto constexpr target_frametime = (1000000us)/global_base_rate;
     auto t0 = std::chrono::steady_clock::now();
     auto sleep_duration_adjustment = 0us;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
-
-        // logic
-        if (abs(triangle_offset) + triangle_increment > triangle_max_offset)
-            movement_direction = movement_direction == Right ? Left : Right;
-
-        triangle_offset += movement_direction == Right ? triangle_increment : -triangle_increment;
 
         // ----------- drawing -----------
         // clear screen
@@ -225,7 +215,47 @@ int main(int argc, char** const argv) {
         // draw call
         glUseProgram(program);
         glBindVertexArray(vao);
-        glUniform1f(x_offset_uniform, triangle_offset);
+        // {
+            // std::lock_guard point_cloud_guard(point_cloud_mutex);
+            point_cloud_mutex.lock();
+            std::vector<float> point_cloud_triangles(point_cloud_points.size()*3, 0.f);
+            float* const point_cloud_triangle_ptr = point_cloud_triangles.data();
+            float* const point_cloud_points_ptr = point_cloud_points.data();
+            float x_max = 0;
+            float y_max = 0;
+            for (size_t point_index=0; point_index<point_cloud_points.size(); point_index+=3) {
+                // triangle has 3x the coordinates of a point, thus:
+                size_t const triangle_index    = 3*point_index;
+                float* const point_ptr         = point_cloud_points_ptr+point_index;
+                float* const triangle_vertex_0 = point_cloud_triangle_ptr+triangle_index;
+                float* const triangle_vertex_1 = triangle_vertex_0 + 3;
+                float* const triangle_vertex_2 = triangle_vertex_1 + 3;
+                auto const x = point_ptr[0];
+                auto const y = point_ptr[1];
+                auto const z = point_ptr[2];
+                triangle_vertex_0[0] = x;
+                triangle_vertex_0[1] = y;
+                triangle_vertex_0[2] = z;
+                triangle_vertex_1[0] = x;
+                triangle_vertex_1[1] = y+.1;
+                triangle_vertex_1[2] = z;
+                triangle_vertex_2[0] = x+.1;
+                triangle_vertex_2[1] = y;
+                triangle_vertex_2[2] = z;
+            }
+            point_cloud_mutex.unlock();
+            // for (size_t i=0; i<point_cloud_triangles.size(); i+=3) {
+            //     auto vertex_ptr = point_cloud_triangle_ptr + i;
+            //     vertex_ptr[0] *= 1/x_max;
+            //     vertex_ptr[1] *= 1/y_max;
+            // }
+            glBufferData(GL_ARRAY_BUFFER, point_cloud_triangles.size()*sizeof(point_cloud_triangles[0]), point_cloud_triangles.data(), GL_STREAM_DRAW);
+            printf("x_max: %f\n", x_max);
+            printf("y_max: %f\n", y_max);
+            glFinish();
+        // }
+        glUniform1f(x_max_uniform_handle, x_max_uniform_handle);
+        glUniform1f(y_max_uniform_handle, y_max_uniform_handle);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         glBindVertexArray(0);
         glfwSwapBuffers(window);

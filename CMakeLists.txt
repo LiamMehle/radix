@@ -33,8 +33,12 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
 add_compile_options("-O1")
 add_compile_options("-g")
 add_compile_options("-march=native")
-add_compile_options("-std=c++17")
+add_compile_options("-std=c++2a")
+# add_compile_options("-fsanitize=address")
+add_link_options("-Wl,--no-undefined")
 add_link_options("-lX11")
+# add_link_options("-lasan")
+# add_link_options("-static-libsan")
 include_directories(
   ${catkin_INCLUDE_DIRS}
   ${Boost_INCLUDE_DIR})

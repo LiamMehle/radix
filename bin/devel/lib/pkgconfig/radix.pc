@@ -1,0 +1,8 @@
+prefix=/home/liam/ros/new_catkin3/src/radix/bin/devel
+
+Name: radix
+Description: Description of radix
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 

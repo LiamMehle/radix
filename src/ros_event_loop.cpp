@@ -4,7 +4,8 @@
 
 std::condition_variable point_cloud_updated;
 std::mutex              point_cloud_mutex;
-std::vector<float>      point_cloud_points;  // todo-perf: left-right instead of single lock
+// std::vector<float>      point_cloud_points;  // todo-perf: left-right instead of single lock
+std::vector<float>      point_cloud_triangles;  // vector of triangles (flattened into floats)
 
 #pragma pack(1)
 struct CloudPoint {
@@ -16,18 +17,42 @@ struct CloudPoint {
 
 static
 void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
-    {
+    size_t const point_count = cloud_msg.data.size()/sizeof(CloudPoint);
+    {  // critical section
+        // acquire lock
         auto const point_cloud_mutex_guard = std::lock_guard<std::mutex>(point_cloud_mutex);
-        point_cloud_points.clear();
+
+        // input data
         auto const point_array = reinterpret_cast<CloudPoint*>(cloud_msg.data.data());
-        size_t const point_count = cloud_msg.data.size()/sizeof(CloudPoint);
+
+        // make guarantees about destination buffer:
+        //   - is correct size,
+        //   - no pointer invalidation
+        point_cloud_triangles.reserve(cloud_msg.data.size()*9);
+        point_cloud_triangles.resize( cloud_msg.data.size()*9);
+        float* const point_cloud_triangle_ptr = point_cloud_triangles.data();
+
         for (size_t i=0; i<point_count; i++) {
             auto const x = point_array[i].x;
             auto const y = point_array[i].y;
             auto const z = point_array[i].z;
-            point_cloud_points.push_back(x);
-            point_cloud_points.push_back(y);
-            point_cloud_points.push_back(z);
+            // triangle is composed of 3 points, each of 3 floats
+            // triangles are flattened into 9 floats each
+            size_t const triangle_float_index    = 9*i;
+            float* const triangle_vertex_0 = point_cloud_triangle_ptr+triangle_float_index;
+            float* const triangle_vertex_1 = triangle_vertex_0 + 3;
+            float* const triangle_vertex_2 = triangle_vertex_1 + 3;
+
+            // writing of floats
+            triangle_vertex_0[0] = x;
+            triangle_vertex_0[1] = y;
+            triangle_vertex_0[2] = z;
+            triangle_vertex_1[0] = x;
+            triangle_vertex_1[1] = y+.1;
+            triangle_vertex_1[2] = z;
+            triangle_vertex_2[0] = x+.1;
+            triangle_vertex_2[1] = y;
+            triangle_vertex_2[2] = z;
         }
     }
     point_cloud_updated.notify_all();

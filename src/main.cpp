@@ -116,7 +116,7 @@ int main(int argc, char** const argv) {
         return 1;
     }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
@@ -152,11 +152,10 @@ int main(int argc, char** const argv) {
     raii::VBO vbo{};
 
     glBindVertexArray(vao);                                                       // bind configuration object: remembers the global (buffer) state
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           // bind the buffer to the slot for how it will be used
-    // glBufferData(GL_ARRAY_BUFFER, sizeof(verticies), verticies, GL_STATIC_DRAW);  // send data to the gpu (with usage hints)
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
-    glEnableVertexAttribArray(0);                                                 // enable the config
-
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           // bind the buffer to the slot for how it will be used
+        // glBufferData(GL_ARRAY_BUFFER, sizeof(verticies), verticies, GL_STATIC_DRAW);  // send data to the gpu (with usage hints)
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
+        glEnableVertexAttribArray(0);                                                 // enable the config
     glBindVertexArray(0);                                                         // unbinding the buffers (safety?)
 
     // shaders:
@@ -207,64 +206,33 @@ int main(int argc, char** const argv) {
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
-        // ----------- drawing -----------
-        // clear screen
-        glClearColor(.1f, .1f, .1f, 5.f);
-        glClear(GL_COLOR_BUFFER_BIT);       
-
-        // draw call
-        glUseProgram(program);
-        glBindVertexArray(vao);
+        // set up data and send to the gpu
         // {
+            glUseProgram(program);
+            glBindVertexArray(vao);
             // std::lock_guard point_cloud_guard(point_cloud_mutex);
             point_cloud_mutex.lock();
-            std::vector<float> point_cloud_triangles(point_cloud_points.size()*3, 0.f);
-            float* const point_cloud_triangle_ptr = point_cloud_triangles.data();
-            float* const point_cloud_points_ptr = point_cloud_points.data();
-            float x_max = 0;
-            float y_max = 0;
-            for (size_t point_index=0; point_index<point_cloud_points.size(); point_index+=3) {
-                // triangle has 3x the coordinates of a point, thus:
-                size_t const triangle_index    = 3*point_index;
-                float* const point_ptr         = point_cloud_points_ptr+point_index;
-                float* const triangle_vertex_0 = point_cloud_triangle_ptr+triangle_index;
-                float* const triangle_vertex_1 = triangle_vertex_0 + 3;
-                float* const triangle_vertex_2 = triangle_vertex_1 + 3;
-                auto const x = point_ptr[0];
-                auto const y = point_ptr[1];
-                auto const z = point_ptr[2];
-                triangle_vertex_0[0] = x;
-                triangle_vertex_0[1] = y;
-                triangle_vertex_0[2] = z;
-                triangle_vertex_1[0] = x;
-                triangle_vertex_1[1] = y+.1;
-                triangle_vertex_1[2] = z;
-                triangle_vertex_2[0] = x+.1;
-                triangle_vertex_2[1] = y;
-                triangle_vertex_2[2] = z;
-                x_max = max(x_max, abs(x));
-                y_max = max(y_max, abs(y));
-            }
-            {
-                auto const temp = max(x_max, y_max);
-                x_max = temp;
-                y_max = temp;
-            }
+            auto const triangle_count = point_cloud_triangles.size()/3;
+            auto const triangle_buffer_size = triangle_count * 3 * sizeof(point_cloud_triangles[0]);
+            glBufferData(GL_ARRAY_BUFFER, triangle_buffer_size, point_cloud_triangles.data(), GL_STATIC_DRAW);
+            glFinish();  // todo-perf: find another way to unlock the mutex
             point_cloud_mutex.unlock();
             // for (size_t i=0; i<point_cloud_triangles.size(); i+=3) {
             //     auto vertex_ptr = point_cloud_triangle_ptr + i;
             //     vertex_ptr[0] *= 1/x_max;
             //     vertex_ptr[1] *= 1/y_max;
             // }
-            auto const triangle_count = point_cloud_triangles.size()/3;
-            auto const triangle_buffer_size = triangle_count * 3 * sizeof(point_cloud_triangles[0]);
-            glBufferData(GL_ARRAY_BUFFER, triangle_buffer_size, point_cloud_triangle_ptr, GL_STREAM_DRAW);
-            printf("x_max: %f\n", x_max);
-            printf("y_max: %f\n", y_max);
+            // printf("x_max: %f\n", x_max);
+            // printf("y_max: %f\n", y_max);
         // }
-        glUniform1f(x_max_uniform_handle, x_max);
-        glUniform1f(y_max_uniform_handle, y_max);
-        glDrawArrays(GL_TRIANGLES, 0, triangle_count);
+        // ----------- drawing -----------
+        // clear screen
+        glClearColor(.1f, .1f, .1f, 5.f);
+        glClear(GL_COLOR_BUFFER_BIT);   
+        // pass data to the gpu to be able to perform compute    
+        glUniform1f(x_max_uniform_handle, 0);
+        glUniform1f(y_max_uniform_handle, 0);
+        glDrawArrays(GL_TRIANGLES, 0, triangle_count);  // draw call
         glBindVertexArray(0);
         glfwSwapBuffers(window);
         glFinish();
@@ -282,6 +250,7 @@ int main(int argc, char** const argv) {
         printf("logic_time: %li us\n", logic_time.count());
         printf("frame_time: %li us\n", frametime.count());
         printf("adjustment: %li us\n", sleep_duration_adjustment.count());
+        printf("fps:        %li\n", 1000000/frametime.count());
         printf("---------------------\n");
         t0 = t2;
     }

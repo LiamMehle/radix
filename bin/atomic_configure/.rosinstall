@@ -1,0 +1,2 @@
+- setup-file:
+    local-name: /home/liam/ros/new_catkin3/src/radix/bin/devel/setup.sh

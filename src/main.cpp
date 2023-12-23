@@ -222,6 +222,7 @@ int main(int argc, char** const argv) {
     glMinSampleShading(.001);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_STENCIL_TEST);
+    size_t triangle_count = 0;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
@@ -229,13 +230,16 @@ int main(int argc, char** const argv) {
         // {
             glUseProgram(program);
             glBindVertexArray(vao);
-            // std::lock_guard point_cloud_guard(point_cloud_mutex);
-            point_cloud_mutex.lock();
-            auto const triangle_count = point_cloud_triangles.size()/3;
-            auto const triangle_buffer_size = triangle_count * 3 * sizeof(point_cloud_triangles[0]);
-            glBufferData(GL_ARRAY_BUFFER, triangle_buffer_size, point_cloud_triangles.data(), GL_STATIC_DRAW);
-            glFinish();  // todo-perf: find another way to unlock the mutex
-            point_cloud_mutex.unlock();
+            if (point_cloud_is_fresh.load(std::memory_order_acquire)) {  // load-acquire is free on x86
+                // std::lock_guard point_cloud_guard(point_cloud_mutex);  // redundant due to atomic bool
+                // point_cloud_mutex.lock();
+                triangle_count = point_cloud_triangles.size()/3;
+                auto const triangle_buffer_size = triangle_count * 3 * sizeof(point_cloud_triangles[0]);
+                glBufferData(GL_ARRAY_BUFFER, triangle_buffer_size, point_cloud_triangles.data(), GL_STREAM_DRAW);
+                glFinish();  // todo-perf: find another way to unlock the mutex
+                // point_cloud_mutex.unlock();
+            }
+            point_cloud_is_fresh.store(false, std::memory_order_release); // store-release is free on x86
             // for (size_t i=0; i<point_cloud_triangles.size(); i+=3) {
             //     auto vertex_ptr = point_cloud_triangle_ptr + i;
             //     vertex_ptr[0] *= 1/x_max;
@@ -266,7 +270,7 @@ int main(int argc, char** const argv) {
         auto const t2 = std::chrono::steady_clock::now();
         auto const frametime = std::chrono::duration_cast<std::chrono::microseconds>(t2-t0);
         sleep_duration_adjustment    = target_frametime-frametime;
-        printf("tri_count:  %ulli\n", triangle_count);
+        printf("tri_count:  %zu\n", triangle_count);
         printf("logic_time: %li us\n", logic_time.count());
         printf("frame_time: %li us\n", frametime.count());
         printf("adjustment: %li us\n", sleep_duration_adjustment.count());

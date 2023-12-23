@@ -30,10 +30,10 @@ set(CMAKE_BINARY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/bin)
 # set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
 # set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
-add_compile_options("-Ofast")
+add_compile_options("-O1")
 add_compile_options("-g")
 add_compile_options("-march=native")
-add_compile_options("-std=c++2a")
+add_compile_options("-std=c++17")
 add_link_options("-lX11")
 include_directories(
   ${catkin_INCLUDE_DIRS}

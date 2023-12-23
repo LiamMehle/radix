@@ -203,6 +203,25 @@ int main(int argc, char** const argv) {
     auto constexpr target_frametime = (1000000us)/global_base_rate;
     auto t0 = std::chrono::steady_clock::now();
     auto sleep_duration_adjustment = 0us;
+    bool data_is_loaded = false;
+    glDisable(GL_BLEND);
+    glEnable(GL_COLOR_LOGIC_OP);
+    glLogicOp(GL_SET);
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_DEBUG_OUTPUT);
+    glDisable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+    glDisable(GL_DEPTH_CLAMP);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_DITHER);
+    glDisable(GL_LINE_SMOOTH);
+    glDisable(GL_MULTISAMPLE);
+    glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    glDisable(GL_SAMPLE_ALPHA_TO_ONE);
+    glDisable(GL_SAMPLE_COVERAGE);
+    glEnable(GL_SAMPLE_SHADING);
+    glMinSampleShading(.001);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_STENCIL_TEST);
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 

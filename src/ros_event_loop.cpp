@@ -23,36 +23,63 @@ void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
         auto const point_cloud_mutex_guard = std::lock_guard<std::mutex>(point_cloud_mutex);
 
         // input data
-        auto const point_array = reinterpret_cast<CloudPoint*>(cloud_msg.data.data());
+        auto const point_array = reinterpret_cast<CloudPoint const*>(cloud_msg.data.data());
+
+
+        auto const height = cloud_msg.height;
+        auto const width  = cloud_msg.width;
+        auto const row_step = cloud_msg.row_step;
+
+        if (height < 2
+         || width < 2 
+         || row_step < width*2*sizeof(float))
+            return;
 
         // make guarantees about destination buffer:
         //   - is correct size,
         //   - no pointer invalidation
-        point_cloud_triangles.reserve(cloud_msg.data.size()*9);
-        point_cloud_triangles.resize( cloud_msg.data.size()*9);
+        // 3 floats/point
+        // 3 points/triangle
+        // 2 triangles/input point except for top row and left column
+        point_cloud_triangles.resize(3*3*2*(height-1)*(width-1));
         float* const point_cloud_triangle_ptr = point_cloud_triangles.data();
 
-        for (size_t i=0; i<point_count; i++) {
-            auto const x = point_array[i].x;
-            auto const y = point_array[i].y;
-            auto const z = point_array[i].z;
-            // triangle is composed of 3 points, each of 3 floats
-            // triangles are flattened into 9 floats each
-            size_t const triangle_float_index    = 9*i;
-            float* const triangle_vertex_0 = point_cloud_triangle_ptr+triangle_float_index;
-            float* const triangle_vertex_1 = triangle_vertex_0 + 3;
-            float* const triangle_vertex_2 = triangle_vertex_1 + 3;
+        for (size_t i=0; i<height-1; i++) {
+            for (size_t j=0; j<width-1; j++) {
+                auto const top_left  = point_array[i    *width+j  ];
+                auto const top_right = point_array[i    *width+j+1];
+                auto const bot_left  = point_array[(i+1)*width+j  ];
+                auto const bot_right = point_array[(i+1)*width+j+1];
+                size_t k = 0;
+                // triangle array is 1 element narrower and 1 element shorter than points
+                auto const point_cloud_iteration_ptr = &point_cloud_triangle_ptr[3*3*2*((i)*(width-1) + (j))];
 
-            // writing of floats
-            triangle_vertex_0[0] = x;
-            triangle_vertex_0[1] = y;
-            triangle_vertex_0[2] = z;
-            triangle_vertex_1[0] = x;
-            triangle_vertex_1[1] = y+.1;
-            triangle_vertex_1[2] = z;
-            triangle_vertex_2[0] = x+.1;
-            triangle_vertex_2[1] = y;
-            triangle_vertex_2[2] = z;
+                // insert top left tri
+                point_cloud_iteration_ptr[k++] = top_left.x;
+                point_cloud_iteration_ptr[k++] = top_left.y;
+                point_cloud_iteration_ptr[k++] = top_left.z;
+
+                point_cloud_iteration_ptr[k++] = top_right.x;
+                point_cloud_iteration_ptr[k++] = top_right.y;
+                point_cloud_iteration_ptr[k++] = top_right.z;
+
+                point_cloud_iteration_ptr[k++] = bot_left.x;
+                point_cloud_iteration_ptr[k++] = bot_left.y;
+                point_cloud_iteration_ptr[k++] = bot_left.z;
+
+                // insert bottom right tri
+                point_cloud_iteration_ptr[k++] = top_right.x;
+                point_cloud_iteration_ptr[k++] = top_right.y;
+                point_cloud_iteration_ptr[k++] = top_right.z;
+
+                point_cloud_iteration_ptr[k++] = bot_right.x;
+                point_cloud_iteration_ptr[k++] = bot_right.y;
+                point_cloud_iteration_ptr[k++] = bot_right.z;
+
+                point_cloud_iteration_ptr[k++] = bot_left.x;
+                point_cloud_iteration_ptr[k++] = bot_left.y;
+                point_cloud_iteration_ptr[k++] = bot_left.z;
+            }
         }
     }
     point_cloud_updated.notify_all();

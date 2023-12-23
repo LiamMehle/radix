@@ -206,7 +206,7 @@ int main(int argc, char** const argv) {
     bool data_is_loaded = false;
     glDisable(GL_BLEND);
     glEnable(GL_COLOR_LOGIC_OP);
-    glLogicOp(GL_SET);
+    glLogicOp(GL_COPY);
     glDisable(GL_CULL_FACE);
     glEnable(GL_DEBUG_OUTPUT);
     glDisable(GL_DEBUG_OUTPUT_SYNCHRONOUS);

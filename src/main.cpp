@@ -205,18 +205,28 @@ int main(int argc, char** const argv) {
     auto sleep_duration_adjustment = 0us;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
-
+        size_t triangle_count;
+        glUseProgram(program);
+        glBindVertexArray(vao);
         // set up data and send to the gpu
-        // {
-            glUseProgram(program);
-            glBindVertexArray(vao);
-            // std::lock_guard point_cloud_guard(point_cloud_mutex);
-            point_cloud_mutex.lock();
-            auto const triangle_count = point_cloud_triangles.size()/3;
-            auto const triangle_buffer_size = triangle_count * 3 * sizeof(point_cloud_triangles[0]);
-            glBufferData(GL_ARRAY_BUFFER, triangle_buffer_size, point_cloud_triangles.data(), GL_STATIC_DRAW);
+        {
+            if (data_is_loaded)
+                goto skip_loading_data;
+            {
+                std::lock_guard point_cloud_guard(point_cloud_mutex);
+                // point_cloud_mutex.lock();
+                triangle_count = point_cloud_triangles.size()/3;
+                if (triangle_count == 0)
+                    goto skip_loading_data;
+
+                {
+                    auto const triangle_buffer_size = triangle_count * 3 * sizeof(point_cloud_triangles[0]);
+                    glBufferData(GL_ARRAY_BUFFER, triangle_buffer_size, point_cloud_triangles.data(), GL_STATIC_DRAW);
+                    data_is_loaded = true;
+                }
+            }
             glFinish();  // todo-perf: find another way to unlock the mutex
-            point_cloud_mutex.unlock();
+            // point_cloud_mutex.unlock();
             // for (size_t i=0; i<point_cloud_triangles.size(); i+=3) {
             //     auto vertex_ptr = point_cloud_triangle_ptr + i;
             //     vertex_ptr[0] *= 1/x_max;
@@ -224,7 +234,8 @@ int main(int argc, char** const argv) {
             // }
             // printf("x_max: %f\n", x_max);
             // printf("y_max: %f\n", y_max);
-        // }
+        }
+skip_loading_data:
         // ----------- drawing -----------
         // clear screen
         glClearColor(.1f, .1f, .1f, 5.f);
@@ -235,7 +246,6 @@ int main(int argc, char** const argv) {
         glDrawArrays(GL_TRIANGLES, 0, triangle_count);  // draw call
         glBindVertexArray(0);
         glfwSwapBuffers(window);
-        glFinish();
         // logic time end
         auto const t1 = std::chrono::steady_clock::now();
         auto const logic_time = std::chrono::duration_cast<std::chrono::microseconds>(t1-t0);

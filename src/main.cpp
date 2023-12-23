@@ -266,6 +266,7 @@ int main(int argc, char** const argv) {
         auto const t2 = std::chrono::steady_clock::now();
         auto const frametime = std::chrono::duration_cast<std::chrono::microseconds>(t2-t0);
         sleep_duration_adjustment    = target_frametime-frametime;
+        printf("tri_count:  %ulli\n", triangle_count);
         printf("logic_time: %li us\n", logic_time.count());
         printf("frame_time: %li us\n", frametime.count());
         printf("adjustment: %li us\n", sleep_duration_adjustment.count());

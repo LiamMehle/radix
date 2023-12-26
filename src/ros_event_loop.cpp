@@ -1,3 +1,5 @@
+// main logic that deals with ros message passing and data sync
+
 #include "ros_event_loop.hpp"
 #include <sensor_msgs/PointCloud2.h>
 #include "global_config.hpp"

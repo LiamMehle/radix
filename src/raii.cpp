@@ -6,12 +6,11 @@ namespace raii {
     private:
         GLuint vao;
     public:
-        VAO() { glGenVertexArrays(1, &this->vao); }
-        VAO(GLuint const& other) { this->vao = other; }
+        VAO() { glGenVertexArrays(1, &this->vao); debug_print("VAO() %d\n", this->vao); }
         VAO(const VAO&) = default;
-        ~VAO() { glDeleteVertexArrays(1, &vao); }
+        ~VAO() { glDeleteVertexArrays(1, &vao); debug_print("~VAO() %d\n", this->vao); }
         void operator=(VAO&) = delete;
-        void operator=(VAO&& other) { this->vao = other; };
+        void operator=(VAO&& other) { this->vao = other; debug_print("VAO(VAO&&) %d\n", this->vao);};
 
         operator GLuint() { return this->vao; }
     };
@@ -19,12 +18,11 @@ namespace raii {
     private:
         GLuint vbo;
     public:
-        VBO() { glCreateBuffers(1, &this->vbo); }
-        VBO(GLuint const& other) { this->vbo = other; }
+        VBO() { glCreateBuffers(1, &this->vbo); debug_print("VBO() %d\n", this->vbo); }
         VBO(const VBO&) = default;
-        ~VBO() { glDeleteVertexArrays(1, &vbo); }
+        ~VBO() { glDeleteVertexArrays(1, &vbo); debug_print("~VBO() %d\n", this->vbo); }
         void operator=(VBO&) = delete;
-        void operator=(VBO&& other) { this->vbo = other; };
+        void operator=(VBO&& other) { this->vbo = other; debug_print("VBO(VBO&&) %d\n", this->vbo); };
 
         operator GLuint() { return this->vbo; }
     };

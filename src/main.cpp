@@ -75,10 +75,13 @@ int main(int argc, char** const argv) {
     // todo-perf: compute shader to expand compressed version of the data
     // buffers:
     raii::VAO vao{};
-    raii::VBO vbo{};
+    raii::VBO vbo1{};
+    raii::VBO vbo2{};
+    size_t vbo1_triangle_count = 0;
+    size_t vbo2_triangle_count = 0;
 
     glBindVertexArray(vao);                                                       // bind configuration object: remembers the global (buffer) state
-        glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           // bind the buffer to the slot for how it will be used
+        // glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           // bind the buffer to the slot for how it will be used
         // glBufferData(GL_ARRAY_BUFFER, sizeof(verticies), verticies, GL_STATIC_DRAW);  // send data to the gpu (with usage hints)
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
         glEnableVertexAttribArray(0);                                                 // enable the config

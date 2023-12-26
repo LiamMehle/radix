@@ -19,11 +19,6 @@
 #include "global_config.hpp"
 #include "ros_event_loop.hpp"
 
-/*
-    Base rate at which everything refreshes
-    This program is based on polling. This is the base rate, mainly setting the rate a which the display refreshes.
-*/
-
 void error_callback(int, const char* err_str) {
     printf("GLFW Error: %s\n", err_str);
 }

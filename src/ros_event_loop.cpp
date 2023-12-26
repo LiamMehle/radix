@@ -5,11 +5,7 @@
 #include "global_config.hpp"
 #include <chrono>
 
-std::condition_variable point_cloud_state_updated;
-std::mutex              point_cloud_mutex;
-// std::vector<float>      point_cloud_points;  // todo-perf: left-right instead of single lock
-std::vector<float>      point_cloud_triangles;  // vector of triangles (flattened into floats)
-std::atomic<bool>       point_cloud_is_fresh;
+ExposedRenderData shared_render_data;  // a set of variables shared with the main GL render thread
 
 #pragma pack(1)
 struct CloudPoint {
@@ -26,14 +22,14 @@ void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
     {  // critical section
         // acquire lock
         // auto const point_cloud_mutex_guard = std::lock_guard<std::mutex>(point_cloud_mutex);  // redundant due to atomic bool
-        if (point_cloud_is_fresh.load(std::memory_order_acquire)) {
+        if (shared_render_data.point_cloud_is_fresh.load(std::memory_order_acquire)) {
             // fresh data was somehow not yet consumed
             // wait for turn
             using namespace std::chrono_literals;
-            auto temp = std::unique_lock(point_cloud_mutex);
+            auto temp = std::unique_lock(shared_render_data.point_cloud_mutex);
             auto constexpr timeout = 100ms;
-            point_cloud_state_updated.wait_for(temp, timeout);
-            if (point_cloud_is_fresh.load(std::memory_order_acquire))
+            shared_render_data.point_cloud_state_updated.wait_for(temp, timeout);
+            if (shared_render_data.point_cloud_is_fresh.load(std::memory_order_acquire))
                 return;  // timeout, give up
         }
         // input data
@@ -55,8 +51,8 @@ void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
         // 3 floats/point
         // 3 points/triangle
         // 2 triangles/input point except for top row and left column
-        point_cloud_triangles.resize(3*3*2*(height-1)*(width-1));
-        float* const point_cloud_triangle_ptr = point_cloud_triangles.data();
+        shared_render_data.point_cloud_triangles.resize(3*3*2*(height-1)*(width-1));
+        float* const point_cloud_triangle_ptr = shared_render_data.point_cloud_triangles.data();
 
         for (size_t i=0; i<height-1; i++) {
             for (size_t j=0; j<width-1; j++) {
@@ -96,8 +92,8 @@ void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
             }
         }
     }
-    point_cloud_is_fresh.store(true, std::memory_order_release);  // store-release is free on x86
-    point_cloud_state_updated.notify_all();
+    shared_render_data.point_cloud_is_fresh.store(true, std::memory_order_release);  // store-release is free on x86
+    shared_render_data.point_cloud_state_updated.notify_all();
 }
 
 void ros_event_loop(int argc, char** const argv, raii::Window const& window) {

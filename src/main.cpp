@@ -26,6 +26,9 @@ static inline constexpr
 auto max(T const a, T const b) -> T { return a > b ? a : b; }
 template<typename T>
 static inline constexpr
+auto min(T const a, T const b) -> T { return a < b ? a : b; }
+template<typename T>
+static inline constexpr
 auto abs(T const a) -> T { return a >= 0 ? a : -a; }
 
 void error_callback(int, const char* err_str) {
@@ -223,6 +226,7 @@ int main(int argc, char** const argv) {
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_STENCIL_TEST);
     size_t triangle_count = 0;
+    auto transfer_stream_complete = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
@@ -230,16 +234,22 @@ int main(int argc, char** const argv) {
         // {
             glUseProgram(program);
             glBindVertexArray(vao);
+            GLint isSignaled = 0;
+            glGetSynciv(transfer_stream_complete, GL_SYNC_STATUS, 1, NULL, &isSignaled);
+            if (isSignaled) {  // if done transfering, release buffer
+                glDeleteSync(transfer_stream_complete);
+                point_cloud_is_fresh.store(false, std::memory_order_release); // store-release is free on x86
+            }
+
             if (point_cloud_is_fresh.load(std::memory_order_acquire)) {  // load-acquire is free on x86
                 // std::lock_guard point_cloud_guard(point_cloud_mutex);  // redundant due to atomic bool
                 // point_cloud_mutex.lock();
                 triangle_count = point_cloud_triangles.size()/3;
                 auto const triangle_buffer_size = triangle_count * 3 * sizeof(point_cloud_triangles[0]);
                 glBufferData(GL_ARRAY_BUFFER, triangle_buffer_size, point_cloud_triangles.data(), GL_STREAM_DRAW);
-                glFinish();  // todo-perf: find another way to unlock the mutex
+                transfer_stream_complete = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
                 // point_cloud_mutex.unlock();
             }
-            point_cloud_is_fresh.store(false, std::memory_order_release); // store-release is free on x86
             // for (size_t i=0; i<point_cloud_triangles.size(); i+=3) {
             //     auto vertex_ptr = point_cloud_triangle_ptr + i;
             //     vertex_ptr[0] *= 1/x_max;
@@ -265,17 +275,22 @@ int main(int argc, char** const argv) {
         // adjustment is divided by 2 as a heuristic (avoid large +/- swings, effectively P from PID with factor of .5)
         auto const time_to_sleep_for = target_frametime - logic_time + (sleep_duration_adjustment/2);
         // max prevents underflow
-        usleep(max(static_cast<int64_t>(0), std::chrono::duration_cast<std::chrono::microseconds>(time_to_sleep_for).count()));
+        auto const safe_time_to_sleep_for = max(static_cast<int64_t>(0), std::chrono::duration_cast<std::chrono::microseconds>(time_to_sleep_for).count());
+        auto const clamped_time_to_sleep_for = min(safe_time_to_sleep_for, target_frametime.count());
+        usleep(clamped_time_to_sleep_for);
         // end of frame time (printing is not included, *though it should be*)
         auto const t2 = std::chrono::steady_clock::now();
         auto const frametime = std::chrono::duration_cast<std::chrono::microseconds>(t2-t0);
         sleep_duration_adjustment    = target_frametime-frametime;
-        printf("tri_count:  %zu\n", triangle_count);
-        printf("logic_time: %li us\n", logic_time.count());
-        printf("frame_time: %li us\n", frametime.count());
-        printf("adjustment: %li us\n", sleep_duration_adjustment.count());
-        printf("fps:        %li\n", 1000000/frametime.count());
-        printf("---------------------\n");
+        auto const fps  = 1000000/frametime.count();
+        if (fps < 50) {
+            printf("tri_count:  %zu\n", triangle_count);
+            printf("logic_time: %li us\n", logic_time.count());
+            printf("frame_time: %li us\n", frametime.count());
+            printf("adjustment: %li us\n", sleep_duration_adjustment.count());
+            printf("fps:        %li\n", fps);
+            printf("---------------------\n");
+        }
         t0 = t2;
     }
 

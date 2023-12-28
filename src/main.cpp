@@ -211,12 +211,12 @@ int main(int argc, char** const argv) {
         sleep_duration_adjustment    = target_frametime-frametime;
         auto const fps  = 1000000/frametime.count();
         if (fps < 50) {
-            // printf("tri_count:  %zu\n", active_buffer.triangle_count);
-            // printf("logic_time: %li us\n", logic_time.count());
-            // printf("frame_time: %li us\n", frametime.count());
-            // printf("adjustment: %li us\n", sleep_duration_adjustment.count());
-            // printf("fps:        %li\n", fps);
-            // printf("---------------------\n");
+            printf("tri_count:  %zu\n", shared_render_data.triangle_count);
+            printf("logic_time: %li us\n", logic_time.count());
+            printf("frame_time: %li us\n", frametime.count());
+            printf("adjustment: %li us\n", sleep_duration_adjustment.count());
+            printf("fps:        %li\n", fps);
+            printf("---------------------\n");
         }
         t0 = t2;
     }

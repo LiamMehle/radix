@@ -21,8 +21,7 @@ namespace raii {
         VBO() { glCreateBuffers(1, &this->vbo); debug_print("VBO() %d\n", this->vbo); }
         VBO(const VBO&) = default;
         ~VBO() { glDeleteVertexArrays(1, &vbo); debug_print("~VBO() %d\n", this->vbo); }
-        void operator=(VBO&) = delete;
-        void operator=(VBO&& other) { this->vbo = other; debug_print("VBO(VBO&&) %d\n", this->vbo); };
+        //void operator=(VBO&& other) { this->vbo = other; debug_print("VBO(VBO&&) %d\n", this->vbo); };
 
         operator GLuint() const { return this->vbo; }
     };

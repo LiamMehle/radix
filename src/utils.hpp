@@ -7,9 +7,9 @@
 template<typename T>
 static inline constexpr
 void swap(T& a, T& b) {
-    T temporary = b;
-    b = a;
-    a = temporary;
+    T temporary = std::move(b);
+    b = std::move(a);
+    a = std::move(temporary);
 }
 template<typename T>
 static inline constexpr

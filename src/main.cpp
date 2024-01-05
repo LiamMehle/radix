@@ -47,7 +47,7 @@ int main(int argc, char** const argv) {
         return 1;
     }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
@@ -77,6 +77,11 @@ int main(int argc, char** const argv) {
 
     glViewport(0, 0, frame_buffer_width, frame_buffer_height);
 
+    if (!glfwExtensionSupported("GL_ARB_buffer_storage")) {
+        puts("[fatal]: I couldn't be bothered to write code to deal with this. Needed for buffer mapping");
+        return 4;
+    }
+
     // todo-perf: compute shader to expand compressed version of the data
     // buffers:
     raii::VAO vao{};
@@ -84,8 +89,6 @@ int main(int argc, char** const argv) {
     TriangleBuffer vbo2 {};
 
     glBindVertexArray(vao);                                                       // bind configuration object: remembers the global (buffer) state
-        // glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           // bind the buffer to the slot for how it will be used
-        // glBufferData(GL_ARRAY_BUFFER, sizeof(verticies), verticies, GL_STATIC_DRAW);  // send data to the gpu (with usage hints)
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
         glEnableVertexAttribArray(0);                                                 // enable the config
     glBindVertexArray(0);                                                         // unbinding the buffers (safety?)
@@ -154,48 +157,60 @@ int main(int argc, char** const argv) {
             if (inactive_buffer_is_mapped)
                 glUnmapBuffer(GL_COPY_WRITE_BUFFER);  // buffer should not be mapped while manipulated
             print_gl_errors("unmap buffer");
+
             auto const new_capacity = max(static_cast<size_t>(4096), shared_render_data.needed_capacity);
             auto const new_buffer_size_in_bytes = new_capacity*sizeof(decltype(*shared_render_data.mapped_buffer));
+    
             // we have ownership, was it successful?
-            if (shared_render_data.needed_capacity > shared_render_data.capacity) {
-                // having sole access to the GL, we reallocate needed capacity and re-release
-                // buffer was too small, no other work is needed
-            } else {
+            if (shared_render_data.needed_capacity <= shared_render_data.capacity) {
+                // success
                 // swap buffers, set up (newly) inactive buffer mapping and noitfy
                 active_buffer_index = !active_buffer_index;
-                swap(active_buffer, inactive_buffer);
+                active_buffer   =  active_buffer_index ? vbo1 : vbo2;
+                inactive_buffer = !active_buffer_index ? vbo1 : vbo2;
                 glBindBuffer(GL_ARRAY_BUFFER,      active_buffer.vbo);
                 glBindBuffer(GL_COPY_WRITE_BUFFER, inactive_buffer.vbo);
-
-                // current buffer may be too big, invalidate and reallocated new inactive buffer
             }
-            glBufferData(GL_COPY_WRITE_BUFFER, new_buffer_size_in_bytes*2, nullptr, GL_STREAM_DRAW);
+            print_gl_errors("pre-allocation");
+            
+            glBufferStorage(GL_COPY_WRITE_BUFFER, new_buffer_size_in_bytes, nullptr,
+                  GL_MAP_WRITE_BIT                 // only write is needed
+                | GL_MAP_COHERENT_BIT
+                | GL_MAP_PERSISTENT_BIT);          // optimized for iGP unified memory, will still release memory
             // release
-            print_gl_errors("pre-mapping");
+            auto const storage_allocation_error = print_gl_errors("back buffer allocation");
             auto const mapping = static_cast<float*>(glMapBufferRange(GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(0), new_buffer_size_in_bytes,
             // access:
                   GL_MAP_WRITE_BIT              // only write is needed
                 | GL_MAP_COHERENT_BIT           // optimized for iGP unified memory, will still release memory
                 | GL_MAP_INVALIDATE_RANGE_BIT   // the buffer was just allocated, this flag should break any false data dependancies
             ));
-            print_gl_errors("post-mapping");
+            auto const storage_mapping_error = print_gl_errors("back buffer mapping");
             puts("-----------------------------------------------------------");
+            if (!storage_allocation_error && !storage_mapping_error) {
                 shared_render_data.capacity = new_capacity;
-            shared_render_data.needed_capacity = 0;
-            shared_render_data.triangle_count = 0;
-            shared_render_data.mapped_buffer.store(mapping, std::memory_order_release);
-            shared_render_data.update.notify_all();
+                shared_render_data.needed_capacity = 0;
+                shared_render_data.triangle_count = 0;
+                shared_render_data.mapped_buffer.store(mapping, std::memory_order_release);
+                shared_render_data.update.notify_all();
+            }
         }
 
         // ----------- drawing -----------
         // clear screen
         glClearColor(.1f, .1f, .1f, 5.f);
+        print_gl_errors("clear color");
         glClear(GL_COLOR_BUFFER_BIT);   
+        print_gl_errors("clear command");
         // pass data to the gpu to be able to perform compute    
-        glUniform1f(x_max_uniform_handle, 0);
-        glUniform1f(y_max_uniform_handle, 0);
+        // glUniform1f(x_max_uniform_handle, 0);
+        // print_gl_errors("uniform");
+        // glUniform1f(y_max_uniform_handle, 0);
+        // print_gl_errors("uniform");
         glDrawArrays(GL_TRIANGLES, 0, active_buffer.triangle_count);  // draw call
+        print_gl_errors("draw triangle array");
         glfwSwapBuffers(window);
+        print_gl_errors("swap buffers");
         // logic time end
         auto const t1 = std::chrono::steady_clock::now();
         auto const logic_time = std::chrono::duration_cast<std::chrono::microseconds>(t1-t0);

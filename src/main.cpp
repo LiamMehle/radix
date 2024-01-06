@@ -85,16 +85,17 @@ int main(int argc, char** const argv) {
         shared_render_data.buffers[0].vbo = buffers[0];
         shared_render_data.buffers[1].vbo = buffers[1];
     }
-    auto const gl_allocate_trianglebuffer = [](TriangleBuffer& fat_buffer, GLenum const spare_target, size_t const count) {
+    auto const gl_allocate_trianglebuffer = [](TriangleBuffer& fat_buffer, GLenum const spare_target, size_t const new_capacity) {
         glBindBuffer(spare_target, fat_buffer.vbo);
-        auto const capacity = count * sizeof(decltype(*fat_buffer.mapping));
-        glBufferStorage(spare_target, capacity, nullptr,
-            GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT | GL_MAP_WRITE_BIT);
-        fat_buffer.capacity = capacity;
+        auto const size = new_capacity * sizeof(decltype(*fat_buffer.mapping));
+        glBufferStorage(spare_target, size, nullptr,
+            GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT | GL_MAP_WRITE_BIT | GL_MAP_READ_BIT);
+        fat_buffer.capacity = new_capacity;
     };
-    auto const gl_map_buffer = [](GLenum const target, size_t const size) {
-        return static_cast<float*>(glMapBufferRange(GL_COPY_WRITE_BUFFER, 0, size,
-                    GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT | GL_MAP_WRITE_BIT));
+    // maps `count` floats from `target`
+    auto const gl_map_buffer = [](GLenum const target, TriangleBuffer const& associated_buffer) {
+        return static_cast<float*>(glMapBufferRange(GL_COPY_WRITE_BUFFER, 0, associated_buffer.capacity * sizeof(*associated_buffer.mapping),
+                    GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT | GL_MAP_WRITE_BIT | GL_MAP_READ_BIT));
     };
 
     gl_allocate_trianglebuffer(shared_render_data.buffers[0], GL_COPY_WRITE_BUFFER, 4096);
@@ -137,8 +138,6 @@ int main(int argc, char** const argv) {
         }
     }
 
-    auto const z_uniform = glGetUniformLocation(program, "z");
-    print_gl_errors("get z uniform location");
     auto const zoom_uniform = glGetUniformLocation(program, "zoom");
     print_gl_errors("get zoom uniform location");
 
@@ -167,17 +166,24 @@ int main(int argc, char** const argv) {
             bool const copy_was_successful = shared_render_data.needed_capacity <= inactive_buffer().capacity;
             if (copy_was_successful) {
                 // cleanup
-                // glUnmapBuffer(GL_COPY_WRITE_BUFFER);
+                if (active_buffer().mapping)
+                    glUnmapBuffer(GL_ARRAY_BUFFER);
+                active_buffer().mapping = nullptr;
+                print_gl_errors("swap-unmap active");
+                if (inactive_buffer().mapping)
+                    glUnmapBuffer(GL_COPY_WRITE_BUFFER);
                 inactive_buffer().mapping = nullptr;
-                print_gl_errors("swap-unmap");
+                print_gl_errors("swap-unmap inactive");
+
                 // swap
-                shared_render_data.active_buffer = inactive_buffer_id();
+                shared_render_data.active_buffer = inactive_buffer_id();  // swaps semantics of active_buffer() and inactive_buffer()
+
                 // setup
                 glBindBuffer(GL_ARRAY_BUFFER,        active_buffer().vbo);
                 print_gl_errors("swap-bind1");
                 glBindBuffer(GL_COPY_WRITE_BUFFER, inactive_buffer().vbo);
                 print_gl_errors("swap-bind2");
-                inactive_buffer().mapping = gl_map_buffer(GL_COPY_WRITE_BUFFER, inactive_buffer().capacity);
+                inactive_buffer().mapping = gl_map_buffer(GL_COPY_WRITE_BUFFER, inactive_buffer());
                 print_gl_errors("swap-map");
             } else {
                 glUnmapBuffer(GL_COPY_WRITE_BUFFER);
@@ -193,7 +199,7 @@ int main(int argc, char** const argv) {
                 print_gl_errors("noswap-bind");
                 gl_allocate_trianglebuffer(inactive_buffer(), GL_COPY_WRITE_BUFFER, shared_render_data.needed_capacity);
                 print_gl_errors("noswap-alloc");
-                inactive_buffer().mapping = gl_map_buffer(GL_COPY_WRITE_BUFFER, inactive_buffer().capacity);
+                inactive_buffer().mapping = gl_map_buffer(GL_COPY_WRITE_BUFFER, inactive_buffer());
                 print_gl_errors("noswap-map");
             }
             shared_render_data.copy_in_progress.store(true, std::memory_order_release);
@@ -211,7 +217,6 @@ int main(int argc, char** const argv) {
         glBindVertexArray(vao);
         glUseProgram(program);
 
-        glUniform1f(z_uniform, 0.0f);
         glUniform1f(zoom_uniform, active_buffer().zoom);
         print_gl_errors("set zoom uniform");
 

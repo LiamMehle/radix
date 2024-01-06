@@ -99,13 +99,17 @@ void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
                 point_cloud_iteration_ptr[k++] = bot_left.x;
                 point_cloud_iteration_ptr[k++] = bot_left.y;
                 point_cloud_iteration_ptr[k++] = bot_left.z;
+                break;
             }
+            break;
         }
+
         float max_distance = 0.f;
         for (size_t i=0; i<height*width; i++) {
             auto const point = point_array[i];
             max_distance = max(max_distance, max(point.x, point.y));
         }
+
         // update shared metadata
         // shared_render_data.capacity is unchanged                                                         // description of work done
         owned_buffer.zoom = 1/max_distance;

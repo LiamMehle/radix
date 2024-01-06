@@ -19,10 +19,7 @@
 #include "global_config.hpp"
 #include "ros_event_loop.hpp"
 
-/*
-    Base rate at which everything refreshes
-    This program is based on polling. This is the base rate, mainly setting the rate a which the display refreshes.
-*/
+ExposedRenderData shared_render_data;  // a set of variables shared with the main GL render thread
 
 void error_callback(int, const char* err_str) {
     printf("GLFW Error: %s\n", err_str);
@@ -30,46 +27,43 @@ void error_callback(int, const char* err_str) {
 
 namespace fs = std::filesystem;
 std::string binary_path = fs::canonical("/proc/self/exe").parent_path();
-static
-int x_error_handler(Display* display, XErrorEvent* event) {
-    puts("a");
-    return 0;
-}
+// static
+// int x_error_handler(Display* display, XErrorEvent* event) {
+//     puts("a");
+//     return 0;
+// }
 
 int main(int argc, char** const argv) {
     ros::init(argc, argv, "radix_node");
+    // start ros-related thread
+    std::thread ros_thread = std::thread([&]{ros_event_loop(argc, argv);});
+
     // initialize OpenGL
-    int status = 0;
     glfwSetErrorCallback(error_callback);
     raii::GLFW glfw{};
     if (glfw != GLFW_TRUE) {
         puts("failed to initialize glfw");
         return 1;
     }
+
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-
     raii::Window window = raii::Window(WIDTH, HEIGHT, "Radix", nullptr, nullptr);
     if (!static_cast<GLFWwindow*>(window)) {
         puts("failed to create a window");
         return 2;
     }
 
-    // start ros-related thread
-    std::thread ros_thread = std::thread([&]{ros_event_loop(argc, argv, window);});
-
     // continue configuration of window/context
     int frame_buffer_width, frame_buffer_height;
     glfwGetFramebufferSize(window, &frame_buffer_width, &frame_buffer_height);
-
     glfwMakeContextCurrent(window);
     printf("vendor:   %s\n", reinterpret_cast<char const*>(glGetString(GL_VENDOR)));
     printf("renderer: %s\n", reinterpret_cast<char const*>(glGetString(GL_RENDERER)));
 
     glewExperimental = GL_TRUE;
-
     if (glewInit() != GLEW_OK) {
         puts("failed to init glew");
         return 3;
@@ -78,15 +72,33 @@ int main(int argc, char** const argv) {
     glViewport(0, 0, frame_buffer_width, frame_buffer_height);
 
     if (!glfwExtensionSupported("GL_ARB_buffer_storage")) {
-        puts("[fatal]: I couldn't be bothered to write code to deal with this. Needed for buffer mapping");
+        puts("[fatal]: No support for GL_ARB_buffer_storage. I couldn't be bothered to write code to deal with this. Needed for buffer mapping");
         return 4;
     }
 
     // todo-perf: compute shader to expand compressed version of the data
     // buffers:
     raii::VAO vao{};
-    TriangleBuffer vbo1 {};
-    TriangleBuffer vbo2 {};
+    {    
+        GLuint buffers[2];
+        glCreateBuffers(2, buffers);
+        shared_render_data.buffers[0].vbo = buffers[0];
+        shared_render_data.buffers[1].vbo = buffers[1];
+    }
+    auto const gl_allocate_trianglebuffer = [](TriangleBuffer& fat_buffer, GLenum const spare_target, size_t const count) {
+        glBindBuffer(spare_target, fat_buffer.vbo);
+        auto const capacity = count * sizeof(decltype(*fat_buffer.mapping));
+        glBufferStorage(spare_target, capacity, nullptr,
+            GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT | GL_MAP_WRITE_BIT);
+        fat_buffer.capacity = capacity;
+    };
+    auto const gl_map_buffer = [](GLenum const target, size_t const size) {
+        return static_cast<float*>(glMapBufferRange(GL_COPY_WRITE_BUFFER, 0, size,
+                    GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT | GL_MAP_WRITE_BIT));
+    };
+
+    gl_allocate_trianglebuffer(shared_render_data.buffers[0], GL_COPY_WRITE_BUFFER, 4096);
+    gl_allocate_trianglebuffer(shared_render_data.buffers[1], GL_COPY_WRITE_BUFFER, 4096);
 
     glBindVertexArray(vao);                                                       // bind configuration object: remembers the global (buffer) state
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
@@ -125,8 +137,10 @@ int main(int argc, char** const argv) {
         }
     }
 
-    GLint const x_max_uniform_handle = glGetUniformLocation(program, "x_max");
-    GLint const y_max_uniform_handle = glGetUniformLocation(program, "x_max");
+    auto const z_uniform = glGetUniformLocation(program, "z");
+    print_gl_errors("get z uniform location");
+    auto const zoom_uniform = glGetUniformLocation(program, "zoom");
+    print_gl_errors("get zoom uniform location");
 
     // enable vsync if present:
     set_vsync(true);
@@ -135,65 +149,55 @@ int main(int argc, char** const argv) {
     auto constexpr target_frametime = (1000000us)/global_base_rate;
     auto t0 = std::chrono::steady_clock::now();
     auto sleep_duration_adjustment = 0us;
-    bool data_is_loaded = false;
     configure_features();
-    auto transfer_stream_complete = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-    bool active_buffer_index = 0;
     while (!glfwWindowShouldClose(window)) {
-        print_gl_errors("top of loop");
         glfwPollEvents();
-        print_gl_errors("poll events");
-        glBindVertexArray(vao);
-        auto&   active_buffer =  active_buffer_index ? vbo1 : vbo2;
-        auto& inactive_buffer = !active_buffer_index ? vbo1 : vbo2;
-        glBindBuffer(GL_ARRAY_BUFFER,      active_buffer.vbo);
-        print_gl_errors("bind active buffer");
-        glBindBuffer(GL_COPY_WRITE_BUFFER, inactive_buffer.vbo);
-        print_gl_errors("bind inactivebuffer");
-        // set up inactive buffer for filling  // persistent mapping is not possible in GL4.1, so a little more work is needed
-        if (shared_render_data.mapped_buffer.load(std::memory_order_acquire) == nullptr) {  // ownership is given
-            GLint inactive_buffer_is_mapped = 0;
-            glGetBufferParameteriv(GL_COPY_WRITE_BUFFER, GL_BUFFER_MAPPED, &inactive_buffer_is_mapped);
-            if (inactive_buffer_is_mapped)
-                glUnmapBuffer(GL_COPY_WRITE_BUFFER);  // buffer should not be mapped while manipulated
-            print_gl_errors("unmap buffer");
+        auto const   active_buffer_id = [&]                      { return shared_render_data.active_buffer == 0 ? 0 : 1;    };
+        auto const inactive_buffer_id = [&]                      { return shared_render_data.active_buffer != 0 ? 0 : 1;    };
+        auto const   active_buffer    = [&]() -> TriangleBuffer& { return shared_render_data.buffers[  active_buffer_id()]; };
+        auto const inactive_buffer    = [&]() -> TriangleBuffer& { return shared_render_data.buffers[inactive_buffer_id()]; };
 
-            auto const new_capacity = max(static_cast<size_t>(4096), shared_render_data.needed_capacity);
-            auto const new_buffer_size_in_bytes = new_capacity*sizeof(decltype(*shared_render_data.mapped_buffer));
-    
-            // we have ownership, was it successful?
-            if (shared_render_data.needed_capacity <= shared_render_data.capacity) {
-                // success
-                // swap buffers, set up (newly) inactive buffer mapping and noitfy
-                active_buffer_index = !active_buffer_index;
-                active_buffer   =  active_buffer_index ? vbo1 : vbo2;
-                inactive_buffer = !active_buffer_index ? vbo1 : vbo2;
-                glBindBuffer(GL_ARRAY_BUFFER,      active_buffer.vbo);
-                glBindBuffer(GL_COPY_WRITE_BUFFER, inactive_buffer.vbo);
+        glBindVertexArray(vao);
+
+        // setup transfer to the correct buffer
+        // if transfer is done, swap buffers and
+
+        bool const has_ownership = !shared_render_data.copy_in_progress;
+        if (has_ownership) {
+            bool const copy_was_successful = shared_render_data.needed_capacity <= inactive_buffer().capacity;
+            if (copy_was_successful) {
+                // cleanup
+                // glUnmapBuffer(GL_COPY_WRITE_BUFFER);
+                inactive_buffer().mapping = nullptr;
+                print_gl_errors("swap-unmap");
+                // swap
+                shared_render_data.active_buffer = inactive_buffer_id();
+                // setup
+                glBindBuffer(GL_ARRAY_BUFFER,        active_buffer().vbo);
+                print_gl_errors("swap-bind1");
+                glBindBuffer(GL_COPY_WRITE_BUFFER, inactive_buffer().vbo);
+                print_gl_errors("swap-bind2");
+                inactive_buffer().mapping = gl_map_buffer(GL_COPY_WRITE_BUFFER, inactive_buffer().capacity);
+                print_gl_errors("swap-map");
+            } else {
+                glUnmapBuffer(GL_COPY_WRITE_BUFFER);
+                inactive_buffer().mapping = nullptr;
+                // buffer is immutable, so a new buffer must be created
+                print_gl_errors("noswap-unmap");
+                glDeleteBuffers(1, &inactive_buffer().vbo);
+                inactive_buffer().vbo = 0;
+                print_gl_errors("noswap-delete");
+                glCreateBuffers(1, &inactive_buffer().vbo);
+                print_gl_errors("noswap-create");
+                glBindBuffer(GL_COPY_WRITE_BUFFER, inactive_buffer().vbo);
+                print_gl_errors("noswap-bind");
+                gl_allocate_trianglebuffer(inactive_buffer(), GL_COPY_WRITE_BUFFER, shared_render_data.needed_capacity);
+                print_gl_errors("noswap-alloc");
+                inactive_buffer().mapping = gl_map_buffer(GL_COPY_WRITE_BUFFER, inactive_buffer().capacity);
+                print_gl_errors("noswap-map");
             }
-            print_gl_errors("pre-allocation");
-            
-            glBufferStorage(GL_COPY_WRITE_BUFFER, new_buffer_size_in_bytes, nullptr,
-                  GL_MAP_WRITE_BIT                 // only write is needed
-                | GL_MAP_COHERENT_BIT
-                | GL_MAP_PERSISTENT_BIT);          // optimized for iGP unified memory, will still release memory
-            // release
-            auto const storage_allocation_error = print_gl_errors("back buffer allocation");
-            auto const mapping = static_cast<float*>(glMapBufferRange(GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(0), new_buffer_size_in_bytes,
-            // access:
-                  GL_MAP_WRITE_BIT              // only write is needed
-                | GL_MAP_COHERENT_BIT           // optimized for iGP unified memory, will still release memory
-                | GL_MAP_INVALIDATE_RANGE_BIT   // the buffer was just allocated, this flag should break any false data dependancies
-            ));
-            auto const storage_mapping_error = print_gl_errors("back buffer mapping");
-            puts("-----------------------------------------------------------");
-            if (!storage_allocation_error && !storage_mapping_error) {
-                shared_render_data.capacity = new_capacity;
-                shared_render_data.needed_capacity = 0;
-                shared_render_data.triangle_count = 0;
-                shared_render_data.mapped_buffer.store(mapping, std::memory_order_release);
-                shared_render_data.update.notify_all();
-            }
+            shared_render_data.copy_in_progress.store(true, std::memory_order_release);
+            shared_render_data.update.notify_all();
         }
 
         // ----------- drawing -----------
@@ -202,12 +206,16 @@ int main(int argc, char** const argv) {
         print_gl_errors("clear color");
         glClear(GL_COLOR_BUFFER_BIT);   
         print_gl_errors("clear command");
-        // pass data to the gpu to be able to perform compute    
-        // glUniform1f(x_max_uniform_handle, 0);
-        // print_gl_errors("uniform");
-        // glUniform1f(y_max_uniform_handle, 0);
-        // print_gl_errors("uniform");
-        glDrawArrays(GL_TRIANGLES, 0, active_buffer.triangle_count);  // draw call
+
+
+        glBindVertexArray(vao);
+        glUseProgram(program);
+
+        glUniform1f(z_uniform, 0.0f);
+        glUniform1f(zoom_uniform, active_buffer().zoom);
+        print_gl_errors("set zoom uniform");
+
+        glDrawArrays(GL_TRIANGLES, 0, active_buffer().triangle_count);  // draw call
         print_gl_errors("draw triangle array");
         glfwSwapBuffers(window);
         print_gl_errors("swap buffers");
@@ -226,7 +234,7 @@ int main(int argc, char** const argv) {
         sleep_duration_adjustment    = target_frametime-frametime;
         auto const fps  = 1000000/frametime.count();
         if (fps < 50) {
-            printf("tri_count:  %zu\n", shared_render_data.triangle_count);
+            printf("tri_count:  %zu\n", active_buffer().triangle_count);
             printf("logic_time: %li us\n", logic_time.count());
             printf("frame_time: %li us\n", frametime.count());
             printf("adjustment: %li us\n", sleep_duration_adjustment.count());
@@ -234,6 +242,8 @@ int main(int argc, char** const argv) {
             printf("---------------------\n");
         }
         t0 = t2;
+        
+        print_gl_errors("uncaught loop errors");
     }
 
     return 0;

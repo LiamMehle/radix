@@ -1,9 +1,8 @@
 #version 330
-uniform float x_max;
-uniform float y_max;
 layout (location=0) in vec3 pos;
+uniform float z;
+uniform float zoom;
 void main() {
-    float z = 0.;
-    vec2 pos = pos.xy;
+    vec2 pos = pos.xy * zoom;
     gl_Position = vec4(pos, z, 1.);
 }

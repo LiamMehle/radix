@@ -5,16 +5,16 @@
 #include <condition_variable>
 #include <mutex>
 #include <atomic>
+#include <array>
 
-void ros_event_loop(int argc, char** const argv, raii::Window const& window);
+void ros_event_loop(int argc, char** const argv);
 
 struct TriangleBuffer {
-    raii::VBO vbo{};
+    GLuint vbo            = 0;
     size_t triangle_count = 0;
-    size_t capacity = 0;
-    TriangleBuffer() = default;
-    TriangleBuffer(TriangleBuffer const&) = default;
-    TriangleBuffer& operator=(TriangleBuffer&) = default;
+    size_t capacity       = 0;
+    float* mapping        = nullptr;
+    float  zoom           = 0;
 };
 
 /*  semantics/conrtact:
@@ -25,10 +25,10 @@ struct TriangleBuffer {
 */
 struct ExposedRenderData {
     std::condition_variable update{};
-    std::atomic<float*> mapped_buffer = nullptr;
-    size_t triangle_count = 0;  // number of triangles written | input to render pipeline
-    size_t capacity = 0;        // buffer's capacity           | output from render pipeline request
-    size_t needed_capacity = 0; // needed capacity             | input into render pipeline
+    std::array<TriangleBuffer, 2> buffers;
+    int active_buffer;                      // buffer currentry being drawn from
+    std::atomic<bool> copy_in_progress;     // copy into inactive buffer in progress, also implies the ownership of the entire struct's resources
+    size_t needed_capacity = 0;             // capacity needed for full copy
 };
 
 extern ExposedRenderData shared_render_data;

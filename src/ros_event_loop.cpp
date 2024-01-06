@@ -5,8 +5,6 @@
 #include "global_config.hpp"
 #include <chrono>
 
-ExposedRenderData shared_render_data;  // a set of variables shared with the main GL render thread
-
 #pragma pack(1)
 struct CloudPoint {
     float x, y, z;
@@ -38,35 +36,32 @@ void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
          || row_step < width*2*sizeof(float))
             return;
 
-        size_t const needed_capacity = 3*3*2*static_cast<size_t>(height-1)*static_cast<size_t>(width-1);
-        shared_render_data.needed_capacity = needed_capacity;
-        
-        // edgecase where on failiure to allocate a buffer,
-        // or if no buffer was provided, needed capacity is still communicated.
-        // this needs to be made visible to other threads (the main thread).
-        // No modification of the pointer is intended
-        shared_render_data.mapped_buffer.load(std::memory_order_release);
-
-        // guarantee buffer ownership
-        while (shared_render_data.mapped_buffer.load(std::memory_order_acquire) == nullptr)
-            shared_render_data.update.wait_for(unique_lock, std::chrono::duration(1s));
 
         // 3 floats/point
         // 3 points/triangle
         // 2 triangles/input point except for top row and left column
-        // should be executed only once, but safety is number one priority
-        while (shared_render_data.capacity < needed_capacity) {
-            shared_render_data.triangle_count = 0;                                          // none written
-            shared_render_data.needed_capacity = needed_capacity;                           // known needed capacity
+        size_t const needed_capacity = 3*3*2*static_cast<size_t>(height-1)*static_cast<size_t>(width-1);
+        
+        bool const owns_shared_data = shared_render_data.copy_in_progress.load(std::memory_order_acquire);
+        if (!owns_shared_data) {
+            shared_render_data.copy_in_progress.store(false, std::memory_order_release);
+            return;
+        }
+        
+        auto const inactive_buffer_id = [&]{ return shared_render_data.active_buffer != 0 ? 0 : 1; };
+        auto&      owned_buffer = shared_render_data.buffers[inactive_buffer_id()];
 
-            shared_render_data.mapped_buffer.store(nullptr, std::memory_order_release);     // relinquish onwership of buffer
-            shared_render_data.update.notify_all();                                         // contractual obligation to signal update
-            shared_render_data.update.wait_for(unique_lock, std::chrono::duration(1s));  // wait for access to mapped buffer
-            shared_render_data.mapped_buffer.load(std::memory_order_acquire);               // make sure new data is loaded
+        shared_render_data.needed_capacity = needed_capacity;
+        if (needed_capacity > owned_buffer.capacity) {
+            shared_render_data.copy_in_progress.store(false, std::memory_order_release);
+            return;
         }
 
-        // not guaranteed to have loaded the pointer or related data
-        float* const point_cloud_triangle_ptr = shared_render_data.mapped_buffer.load(std::memory_order_acquire);
+        float* const point_cloud_triangle_ptr = owned_buffer.mapping;
+        if (!point_cloud_triangle_ptr){
+            shared_render_data.copy_in_progress.store(false, std::memory_order_release);
+            return;
+        }
 
         for (size_t i=0; i<height-1; i++) {
             for (size_t j=0; j<width-1; j++) {
@@ -106,32 +101,26 @@ void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
                 point_cloud_iteration_ptr[k++] = bot_left.z;
             }
         }
+        float max_distance = 0.f;
+        for (size_t i=0; i<height*width; i++) {
+            auto const point = point_array[i];
+            max_distance = max(max_distance, max(point.x, point.y));
+        }
         // update shared metadata
-        // shared_render_data.capacity is unchanged
-        shared_render_data.needed_capacity = needed_capacity;                        // description of work done
-        shared_render_data.triangle_count  = needed_capacity/3;                      // description of work done
-        shared_render_data.mapped_buffer.store(nullptr, std::memory_order_release);  // relinquish onwership of buffer
-        shared_render_data.update.notify_all();                                      // contractual obligation to signal update
+        // shared_render_data.capacity is unchanged                                                         // description of work done
+        owned_buffer.zoom = 1/max_distance;
+        owned_buffer.triangle_count = needed_capacity/3;                                                    // description of work done
+        shared_render_data.copy_in_progress.store(false, std::memory_order_release);                        // relinquish onwership of buffer
+        shared_render_data.update.notify_all();                                                             // contractual obligation to signal update
     }
 }
 
-void ros_event_loop(int argc, char** const argv, raii::Window const& window) {
+void ros_event_loop(int argc, char** const argv) {
     ros::NodeHandle n;
     
     auto transport_hints = ros::TransportHints();
     transport_hints.tcpNoDelay(true);
     auto const subscriber = n.subscribe("/pico_flexx/points", 1024, update_point_cloud, transport_hints);
 
-    ros::Rate loop_rate(2*global_base_rate);
-    bool ros_not_ok_notify_flag = false;  // keeps track of wether a notification of ros failing was sent
-    while(!glfwWindowShouldClose(window)){
-        if (ros_not_ok_notify_flag && !ros::ok()) {
-            puts("ros::ok() == false");
-            ros_not_ok_notify_flag = true;
-            // todo: retry making a new NodeHandle and reinitialize ros
-        }
-
-        ros::spinOnce();
-        loop_rate.sleep();
-    }
+    ros::spin();
 }

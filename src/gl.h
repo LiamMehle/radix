@@ -7,16 +7,17 @@
 #include <GL/glx.h>
 #include <X11/Xlib.h>
 
+#ifndef NODEBUG
 static inline
 GLenum print_gl_errors(char const* const where) {
-    printf("%s:\n", where);
-    GLenum error = GL_NO_ERROR;
-    error = glGetError();
-    if (error == GL_NO_ERROR)
-        return GL_NO_ERROR;
+    GLenum error = glGetError();
     while (error != GL_NO_ERROR) {
-        printf("\t%s\n", gluErrorString(error));
+        printf("%s:\t%s\n", where, gluErrorString(error));
         error = glGetError();
     }
-    return -1;
+    return error;
 }
+#else
+static inline
+GLenum print_gl_errors(char const* const where){ return GL_NO_ERROR; }
+#endif

@@ -3,7 +3,7 @@ project(radix)
 find_package(catkin REQUIRED COMPONENTS roscpp )
 catkin_package()
 
-set(OpenGL_GL_PREFERENCE GLVND)
+set(OpenGL_GL_PREFERENCE LEGACY)
 find_package(X11 REQUIRED)
 include_directories(${X11_INCLUDE_DIR})
 link_directories(${X11_LIBRARIES})

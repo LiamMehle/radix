@@ -86,8 +86,8 @@ int main(int argc, char** const argv) {
     glBindVertexArray(vao);                                                       // bind configuration object: remembers the global (buffer) state
         // glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           // bind the buffer to the slot for how it will be used
         // glBufferData(GL_ARRAY_BUFFER, sizeof(verticies), verticies, GL_STATIC_DRAW);  // send data to the gpu (with usage hints)
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
-        glEnableVertexAttribArray(0);                                                 // enable the config
+        // glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
+        // glEnableVertexAttribArray(0);                                                 // enable the config
     glBindVertexArray(0);                                                         // unbinding the buffers (safety?)
 
     // shaders:
@@ -164,6 +164,10 @@ int main(int argc, char** const argv) {
         glClearColor(.1f, .1f, .1f, 5.f);
         glClear(GL_COLOR_BUFFER_BIT);   
         // pass data to the gpu to be able to perform compute
+        glBindVertexArray(vao);
+        glUseProgram(program);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
+        glEnableVertexAttribArray(0);                                                 // enable the config
         glDrawArrays(GL_TRIANGLES, 0, current_active_buffer().vertex_count);  // draw call
         glfwSwapBuffers(window);
         // logic time end

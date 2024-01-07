@@ -90,8 +90,10 @@ void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
                 point_cloud_iteration_ptr[k++] = bot_left.z;
             }
         }
+        transient_buffer->vertex_count = float_count / 3;
     }
     glUnmapBuffer(GL_COPY_WRITE_BUFFER);
+    glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
     shared_render_data.inactive_buffer.store(nullptr, std::memory_order_release);
 }
 

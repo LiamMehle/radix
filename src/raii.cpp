@@ -12,7 +12,7 @@ namespace raii {
         void operator=(VAO&) = delete;
         void operator=(VAO&& other) { this->vao = other; debug_print("VAO(VAO&&) %d\n", this->vao);};
 
-        operator GLuint() { return this->vao; }
+        operator GLuint() const { return this->vao; }
     };
     class VBO {
     private:
@@ -24,7 +24,7 @@ namespace raii {
         void operator=(VBO&) = delete;
         void operator=(VBO&& other) { this->vbo = other; debug_print("VBO(VBO&&) %d\n", this->vbo); };
 
-        operator GLuint() { return this->vbo; }
+        operator GLuint() const { return this->vbo; }
     };
 
     class Window {

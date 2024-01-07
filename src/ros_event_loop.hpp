@@ -8,11 +8,13 @@
 
 void ros_event_loop(int argc, char** const argv, raii::Window const& window);
 
+struct GLBufferObject {
+    GLuint vbo;
+    size_t vertex_count;
+};
+
 struct ExposedRenderData {
-    std::condition_variable point_cloud_state_updated;
-    std::mutex              point_cloud_mutex;
-    std::vector<float>      point_cloud_triangles;   // vector of triangles (flattened into floats)
-    std::atomic<bool>       point_cloud_is_fresh;
+    std::atomic<GLBufferObject*> inactive_buffer;
 };
 
 extern ExposedRenderData shared_render_data;

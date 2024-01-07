@@ -31,6 +31,8 @@ int x_error_handler(Display* display, XErrorEvent* event) {
     return 0;
 }
 
+ExposedRenderData shared_render_data;  // state of the GL thread exposed to other threads
+
 int main(int argc, char** const argv) {
     ros::init(argc, argv, "radix_node");
     // initialize OpenGL
@@ -75,10 +77,14 @@ int main(int argc, char** const argv) {
     // todo-perf: compute shader to expand compressed version of the data
     // buffers:
     raii::VAO vao{};
-    raii::VBO vbo{};
+    std::array<GLBufferObject, 2> vbos;
+    for (auto& vbo : vbos) {
+        glGenBuffers(1, &vbo.vbo);
+        vbo.vertex_count = 0;
+    }
 
     glBindVertexArray(vao);                                                       // bind configuration object: remembers the global (buffer) state
-        glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           // bind the buffer to the slot for how it will be used
+        // glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           // bind the buffer to the slot for how it will be used
         // glBufferData(GL_ARRAY_BUFFER, sizeof(verticies), verticies, GL_STATIC_DRAW);  // send data to the gpu (with usage hints)
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
         glEnableVertexAttribArray(0);                                                 // enable the config
@@ -129,42 +135,37 @@ int main(int argc, char** const argv) {
     bool data_is_loaded = false;
     configure_features();
     size_t triangle_count = 0;
+    uint_fast8_t current_active_buffer_id = 0;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
-        // set up data and send to the gpu
-        // {
-            glUseProgram(program);
-            glBindVertexArray(vao);
-            if (shared_render_data.point_cloud_is_fresh.load(std::memory_order_acquire)) {  // load-acquire is free on x86
-                // std::lock_guard point_cloud_guard(point_cloud_mutex);  // redundant due to atomic bool
-                // point_cloud_mutex.lock();
-                triangle_count = shared_render_data.point_cloud_triangles.size()/3;
-                auto const triangle_buffer_size = triangle_count * 3 * sizeof(shared_render_data.point_cloud_triangles[0]);
-                glBufferData(GL_ARRAY_BUFFER, triangle_buffer_size, shared_render_data.point_cloud_triangles.data(), GL_STREAM_DRAW);
-                glFinish();  // todo-perf: find another way to unlock the mutex
-                // point_cloud_mutex.unlock();
-            }
-            shared_render_data.point_cloud_is_fresh.store(false, std::memory_order_release); // store-release is free on x86
-            // for (size_t i=0; i<point_cloud_triangles.size(); i+=3) {
-            //     auto vertex_ptr = point_cloud_triangle_ptr + i;
-            //     vertex_ptr[0] *= 1/x_max;
-            //     vertex_ptr[1] *= 1/y_max;
-            // }
-            // printf("x_max: %f\n", x_max);
-            // printf("y_max: %f\n", y_max);
-        // }
+        glBindVertexArray(vao);
+
+        // GL buffer id of buffer with data being streamed in, in a background context
+        uint_fast8_t const current_inactive_buffer_id = current_active_buffer_id ? 1 : 0;
+        auto const current_active_buffer = [&]() -> GLBufferObject& { return vbos[current_active_buffer_id]; };
+        // bool compare_exchange_weak( T& expected, T desired,
+        //                             std::memory_order success,
+        //                             std::memory_order failure ) noexcept;
+        GLBufferObject* null = nullptr;
+        auto const buffer_swap_success = shared_render_data.inactive_buffer.compare_exchange_weak(
+            null, &current_active_buffer(),
+            std::memory_order_acq_rel,
+            std::memory_order_consume);
+
+        if (buffer_swap_success) {
+            // swap buffers
+            current_active_buffer_id = current_inactive_buffer_id;
+            glBindBuffer(GL_ARRAY_BUFFER, current_active_buffer().vbo);
+        }
+
         // ----------- drawing -----------
         // clear screen
         glClearColor(.1f, .1f, .1f, 5.f);
         glClear(GL_COLOR_BUFFER_BIT);   
-        // pass data to the gpu to be able to perform compute    
-        glUniform1f(x_max_uniform_handle, 0);
-        glUniform1f(y_max_uniform_handle, 0);
-        glDrawArrays(GL_TRIANGLES, 0, triangle_count);  // draw call
-        glBindVertexArray(0);
+        // pass data to the gpu to be able to perform compute
+        glDrawArrays(GL_TRIANGLES, 0, current_active_buffer().vertex_count);  // draw call
         glfwSwapBuffers(window);
-        glFinish();
         // logic time end
         auto const t1 = std::chrono::steady_clock::now();
         auto const logic_time = std::chrono::duration_cast<std::chrono::microseconds>(t1-t0);
@@ -184,6 +185,9 @@ int main(int argc, char** const argv) {
         printf("---------------------\n");
         t0 = t2;
     }
+
+    for (auto& vbo : vbos)
+        glDeleteBuffers(1, &vbo.vbo);
 
     return 0;
 }

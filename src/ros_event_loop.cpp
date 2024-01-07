@@ -5,7 +5,6 @@
 #include "global_config.hpp"
 #include <chrono>
 
-ExposedRenderData shared_render_data;  // a set of variables shared with the main GL render thread
 
 #pragma pack(1)
 struct CloudPoint {
@@ -15,23 +14,13 @@ struct CloudPoint {
     uint8_t gray;
 };
 
+GLFWwindow* offscreen_window;
+
 static
 void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
     // computational load of creating a valid set of data is dumped here as an alternative to the main render thread
     size_t const point_count = cloud_msg.data.size()/sizeof(CloudPoint);
     {  // critical section
-        // acquire lock
-        // auto const point_cloud_mutex_guard = std::lock_guard<std::mutex>(point_cloud_mutex);  // redundant due to atomic bool
-        if (shared_render_data.point_cloud_is_fresh.load(std::memory_order_acquire)) {
-            // fresh data was somehow not yet consumed
-            // wait for turn
-            using namespace std::chrono_literals;
-            auto temp = std::unique_lock(shared_render_data.point_cloud_mutex);
-            auto constexpr timeout = 100ms;
-            shared_render_data.point_cloud_state_updated.wait_for(temp, timeout);
-            if (shared_render_data.point_cloud_is_fresh.load(std::memory_order_acquire))
-                return;  // timeout, give up
-        }
         // input data
         auto const point_array = reinterpret_cast<CloudPoint const*>(cloud_msg.data.data());
 
@@ -44,15 +33,25 @@ void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
          || width < 2 
          || row_step < width*2*sizeof(float))
             return;
+        
+        auto const transient_buffer = shared_render_data.inactive_buffer.load(std::memory_order_consume);
+        if (transient_buffer == nullptr)
+            return;
 
-        // make guarantees about destination buffer:
-        //   - is correct size,
-        //   - no pointer invalidation
+        glfwMakeContextCurrent(offscreen_window);
+        print_gl_errors("early");
+        glDeleteBuffers(1, &transient_buffer->vbo);
+        glCreateBuffers(1, &transient_buffer->vbo);
+        glBindBuffer(GL_COPY_WRITE_BUFFER, transient_buffer->vbo);
+        print_gl_errors("bind buffer");
         // 3 floats/point
         // 3 points/triangle
         // 2 triangles/input point except for top row and left column
-        shared_render_data.point_cloud_triangles.resize(3*3*2*(height-1)*(width-1));
-        float* const point_cloud_triangle_ptr = shared_render_data.point_cloud_triangles.data();
+        auto const float_count = 3*3*2*((height)*(width-1) + (width));
+        glBufferStorage(GL_COPY_WRITE_BUFFER, float_count*sizeof(float), nullptr, GL_MAP_COHERENT_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_WRITE_BIT);
+        print_gl_errors("buffer storage");
+        float* const point_cloud_triangle_ptr = static_cast<float* const>(glMapBufferRange(GL_COPY_WRITE_BUFFER, 0, float_count * sizeof(float), GL_MAP_COHERENT_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_WRITE_BIT));
+        print_gl_errors("map buffer");
 
         for (size_t i=0; i<height-1; i++) {
             for (size_t j=0; j<width-1; j++) {
@@ -92,8 +91,8 @@ void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
             }
         }
     }
-    shared_render_data.point_cloud_is_fresh.store(true, std::memory_order_release);  // store-release is free on x86
-    shared_render_data.point_cloud_state_updated.notify_all();
+    glUnmapBuffer(GL_COPY_WRITE_BUFFER);
+    shared_render_data.inactive_buffer.store(nullptr, std::memory_order_release);
 }
 
 void ros_event_loop(int argc, char** const argv, raii::Window const& window) {
@@ -103,16 +102,10 @@ void ros_event_loop(int argc, char** const argv, raii::Window const& window) {
     transport_hints.tcpNoDelay(true);
     auto const subscriber = n.subscribe("/pico_flexx/points", 1024, update_point_cloud, transport_hints);
 
-    ros::Rate loop_rate(2*global_base_rate);
-    bool ros_not_ok_notify_flag = false;  // keeps track of wether a notification of ros failing was sent
-    while(!glfwWindowShouldClose(window)){
-        if (ros_not_ok_notify_flag && !ros::ok()) {
-            puts("ros::ok() == false");
-            ros_not_ok_notify_flag = true;
-            // todo: retry making a new NodeHandle and reinitialize ros
-        }
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    offscreen_window = glfwCreateWindow(640, 480, "", NULL, window);
 
-        ros::spinOnce();
-        loop_rate.sleep();
-    }
+    ros::spin();
 }

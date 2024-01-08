@@ -153,11 +153,8 @@ int main(int argc, char** const argv) {
             std::memory_order_acq_rel,
             std::memory_order_consume);
 
-        if (buffer_swap_success) {
-            // swap buffers
+        if (buffer_swap_success)
             current_active_buffer_id = current_inactive_buffer_id;
-            glBindBuffer(GL_ARRAY_BUFFER, current_active_buffer().vbo);
-        }
 
         // ----------- drawing -----------
         // clear screen
@@ -166,9 +163,10 @@ int main(int argc, char** const argv) {
         // pass data to the gpu to be able to perform compute
         glBindVertexArray(vao);
         glUseProgram(program);
+        glBindBuffer(GL_ARRAY_BUFFER, current_active_buffer().vbo);
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
         glEnableVertexAttribArray(0);                                                 // enable the config
-        glDrawArrays(GL_TRIANGLES, 0, current_active_buffer().vertex_count);  // draw call
+        glDrawArrays(GL_TRIANGLES, 0, current_active_buffer().vertex_count);          // draw call
         glfwSwapBuffers(window);
         // logic time end
         auto const t1 = std::chrono::steady_clock::now();
@@ -181,6 +179,7 @@ int main(int argc, char** const argv) {
         auto const t2 = std::chrono::steady_clock::now();
         auto const frametime = std::chrono::duration_cast<std::chrono::microseconds>(t2-t0);
         sleep_duration_adjustment    = target_frametime-frametime;
+        printf("vbo handle: %d\n", current_active_buffer().vbo);
         printf("tri_count:  %zu\n", triangle_count);
         printf("logic_time: %li us\n", logic_time.count());
         printf("frame_time: %li us\n", frametime.count());

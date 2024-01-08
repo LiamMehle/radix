@@ -142,7 +142,7 @@ int main(int argc, char** const argv) {
         glBindVertexArray(vao);
 
         // GL buffer id of buffer with data being streamed in, in a background context
-        uint_fast8_t const current_inactive_buffer_id = current_active_buffer_id ? 1 : 0;
+        uint_fast8_t const current_inactive_buffer_id = current_active_buffer_id ? 0 : 1;
         auto const current_active_buffer = [&]() -> GLBufferObject& { return vbos[current_active_buffer_id]; };
         // bool compare_exchange_weak( T& expected, T desired,
         //                             std::memory_order success,

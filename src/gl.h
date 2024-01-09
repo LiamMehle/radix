@@ -6,8 +6,8 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <GL/glx.h>
 #include <X11/Xlib.h>
-
 #ifndef NODEBUG
+#include <cstdio>
 static inline
 GLenum print_gl_errors(char const* const where) {
     GLenum error = glGetError();

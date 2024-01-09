@@ -24,7 +24,6 @@ void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
         // input data
         auto const point_array = reinterpret_cast<CloudPoint const*>(cloud_msg.data.data());
 
-
         auto const height = cloud_msg.height;
         auto const width  = cloud_msg.width;
         auto const row_step = cloud_msg.row_step;
@@ -46,12 +45,18 @@ void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
         // 3 points/triangle
         // 2 triangles/input point except for top row and left column
         auto const float_count = 3*3*2*((height)*(width-1) + (width));
-        glBufferData(GL_COPY_WRITE_BUFFER, float_count*sizeof(float), nullptr, GL_STREAM_DRAW);
+
+        GLint buffer_size;
+        glGetBufferParameteriv(GL_COPY_WRITE_BUFFER, GL_BUFFER_SIZE, &buffer_size);
+        if (buffer_size < float_count*sizeof(float))
+            // resize buffer
+            glBufferData(GL_COPY_WRITE_BUFFER, float_count*sizeof(float), nullptr, GL_STREAM_DRAW);
+
+        float* __restrict buffer = static_cast<float*>(glMapBuffer(GL_COPY_WRITE_BUFFER, GL_WRITE_ONLY));
+        
         print_gl_errors("buffer storage");
-        float* const point_cloud_triangle_ptr = static_cast<float* const>(malloc(float_count * sizeof(float)));
+        
         print_gl_errors("map buffer");
-        if (!point_cloud_triangle_ptr)
-            return;
         for (size_t i=0; i<height-1; i++) {
             for (size_t j=0; j<width-1; j++) {
                 auto const top_left  = point_array[i    *width+j  ];
@@ -60,7 +65,7 @@ void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
                 auto const bot_right = point_array[(i+1)*width+j+1];
                 size_t k = 0;
                 // triangle array is 1 element narrower and 1 element shorter than points
-                float* point_cloud_iteration_ptr = &point_cloud_triangle_ptr[3*3*2*((i)*(width-1) + (j))];
+                float* point_cloud_iteration_ptr = &buffer[3*3*2*((i)*(width-1) + (j))];
 
                 // insert top left tri
                 point_cloud_iteration_ptr[k++] = top_left.x;
@@ -90,9 +95,7 @@ void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
             }
         }
         transient_buffer->vertex_count = float_count / 3;
-        glBufferData(GL_COPY_WRITE_BUFFER, float_count*sizeof(float), point_cloud_triangle_ptr, GL_STREAM_DRAW);
-        glFinish();
-        free(point_cloud_triangle_ptr);
+        glBufferData(GL_COPY_WRITE_BUFFER, float_count*sizeof(float), buffer, GL_STREAM_DRAW);
     }
     glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
     shared_render_data.inactive_buffer.store(nullptr, std::memory_order_release);

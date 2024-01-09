@@ -38,9 +38,10 @@ bool set_vsync(bool const enabled) {
         printf("[error]: failed to open X display\n");
         return false;
     }
-
+#ifndef NODEBUG
     const char *glx_client_extensions = glXGetClientString(display, GLX_EXTENSIONS);
     puts(glx_client_extensions);
+#endif
 
     glXSwapIntervalEXT_t glXSwapIntervalEXT = 
         (glXSwapIntervalEXT_t)glXGetProcAddress((const GLubyte*)"glXSwapIntervalEXT");

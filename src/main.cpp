@@ -1,5 +1,7 @@
 // main logic of the program
 
+#define NODEBUG
+
 #include <cstdio>
 #include <cstdint>
 #include <cassert>
@@ -62,8 +64,10 @@ int main(int argc, char** const argv) {
     glfwGetFramebufferSize(window, &frame_buffer_width, &frame_buffer_height);
 
     glfwMakeContextCurrent(window);
+#ifndef NODEBUG
     printf("vendor:   %s\n", reinterpret_cast<char const*>(glGetString(GL_VENDOR)));
     printf("renderer: %s\n", reinterpret_cast<char const*>(glGetString(GL_RENDERER)));
+#endif
 
     glewExperimental = GL_TRUE;
 
@@ -179,6 +183,7 @@ int main(int argc, char** const argv) {
         auto const t2 = std::chrono::steady_clock::now();
         auto const frametime = std::chrono::duration_cast<std::chrono::microseconds>(t2-t0);
         sleep_duration_adjustment    = target_frametime-frametime;
+#ifndef NODEBUG
         printf("vbo handle: %d\n", current_active_buffer().vbo);
         printf("tri_count:  %zu\n", triangle_count);
         printf("logic_time: %li us\n", logic_time.count());
@@ -186,6 +191,7 @@ int main(int argc, char** const argv) {
         printf("adjustment: %li us\n", sleep_duration_adjustment.count());
         printf("fps:        %li\n", 1000000/frametime.count());
         printf("---------------------\n");
+#endif
         t0 = t2;
     }
 

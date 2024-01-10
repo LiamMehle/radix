@@ -17,7 +17,7 @@ struct CloudPoint {
 GLFWwindow* offscreen_window;
 
 static
-void update_point_cloud(sensor_msgs::PointCloud2 cloud_msg) {
+void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
     // computational load of creating a valid set of data is dumped here as an alternative to the main render thread
     size_t const point_count = cloud_msg.data.size()/sizeof(CloudPoint);
     {  // critical section

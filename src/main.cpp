@@ -15,6 +15,7 @@
 #include "gl_tools.hpp"
 #include "utils.hpp"
 #include "raii.cpp"
+#include "functional.hpp"
 #include "global_config.hpp"
 #include "ros_event_loop.hpp"
 
@@ -30,7 +31,40 @@ int x_error_handler(Display* display, XErrorEvent* event) {
     return 0;
 }
 
+
+// data used for rendering of a frame
+struct PrivateRenderData {
+    GLint vao;
+    GLint vbo;
+    GLint vertex_count;
+    GLint program;
+};
+
+static
+PrivateRenderData private_render_data;
 ExposedRenderData shared_render_data;  // state of the GL thread exposed to other threads
+
+// window redraw callback, do not call directly, use draw_window instead
+void _draw_window(GLFWwindow* window) {
+    glfwMakeContextCurrent(window);
+    // clear screen
+    glClearColor(.1f, .1f, .1f, 5.f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    // pass data to the gpu to be able to perform compute
+    glBindVertexArray(private_render_data.vao);
+    glUseProgram(private_render_data.program);
+    glBindBuffer(GL_ARRAY_BUFFER, private_render_data.vbo);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);            // configure vbo metadata
+    glEnableVertexAttribArray(0);                                     // enable the config
+    glDrawArrays(GL_TRIANGLES, 0, private_render_data.vertex_count);  // draw call
+    glfwSwapBuffers(window);
+}
+
+// draws/updates the frame based on the data provided
+void draw_window(GLFWwindow* window, PrivateRenderData data) {
+    private_render_data = data;
+    _draw_window(window);
+}
 
 int main(int argc, char** const argv) {
     ros::init(argc, argv, "radix_node");
@@ -137,9 +171,11 @@ int main(int argc, char** const argv) {
     configure_features();
     size_t triangle_count = 0;
     uint_fast8_t current_active_buffer_id = 0;
+    glfwSetWindowRefreshCallback(window, _draw_window);
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
+        auto const cursor_pos = get_cursor_pos(window);
         glBindVertexArray(vao);
 
         // GL buffer id of buffer with data being streamed in, in a background context
@@ -154,21 +190,18 @@ int main(int argc, char** const argv) {
             std::memory_order_acq_rel,
             std::memory_order_consume);
 
-        if (buffer_swap_success)
-            current_active_buffer_id = current_inactive_buffer_id;
+        if (!buffer_swap_success)
+            continue;
+        current_active_buffer_id = current_inactive_buffer_id;
 
         // ----------- drawing -----------
-        // clear screen
-        glClearColor(.1f, .1f, .1f, 5.f);
-        glClear(GL_COLOR_BUFFER_BIT);   
-        // pass data to the gpu to be able to perform compute
-        glBindVertexArray(vao);
-        glUseProgram(program);
-        glBindBuffer(GL_ARRAY_BUFFER, current_active_buffer().vbo);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
-        glEnableVertexAttribArray(0);                                                 // enable the config
-        glDrawArrays(GL_TRIANGLES, 0, current_active_buffer().vertex_count);          // draw call
-        glfwSwapBuffers(window);
+
+        PrivateRenderData render_data;
+        render_data.vao = vao;
+        render_data.vbo = current_active_buffer().vbo;
+        render_data.vertex_count = current_active_buffer().vertex_count;
+        render_data.program = program;
+        draw_window(window, render_data);
         // logic time end
         auto const t1 = std::chrono::steady_clock::now();
         auto const logic_time = std::chrono::duration_cast<std::chrono::microseconds>(t1-t0);

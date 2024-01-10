@@ -1,7 +1,4 @@
 // main logic of the program
-
-#define NODEBUG
-
 #include <cstdio>
 #include <cstdint>
 #include <cassert>

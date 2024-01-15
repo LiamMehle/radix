@@ -19,6 +19,7 @@
 #include "global_config.hpp"
 #include "ros_event_loop.hpp"
 
+static
 void error_callback(int, const char* err_str) {
     printf("GLFW Error: %s\n", err_str);
 }
@@ -33,10 +34,16 @@ int x_error_handler(Display* display, XErrorEvent* event) {
 
 
 // data used for rendering of a frame
+enum PrivateRenderDataFlagBits {
+    perimeter_enabled = 1,
+};
 struct PrivateRenderData {
+    uint32_t flags;
     GLint vao;
-    GLint vbo;
-    GLint vertex_count;
+    GLint point_cloud_vbo;
+    GLint point_cloud_vertex_count;
+    GLint perimeter_vbo;
+    GLint perimeter_vertex_count;
     GLint program;
 };
 
@@ -45,25 +52,39 @@ PrivateRenderData private_render_data;
 ExposedRenderData shared_render_data;  // state of the GL thread exposed to other threads
 
 // window redraw callback, do not call directly, use draw_window instead
+// assumes private render data contains all relevant correct data and *only draws (based on) said data to the screen*
+static
 void _draw_window(GLFWwindow* window) {
     glfwMakeContextCurrent(window);
     // clear screen
     glClearColor(.1f, .1f, .1f, 5.f);
     glClear(GL_COLOR_BUFFER_BIT);
-    // pass data to the gpu to be able to perform compute
+
+    // draw point cloud
     glBindVertexArray(private_render_data.vao);
     glUseProgram(private_render_data.program);
-    glBindBuffer(GL_ARRAY_BUFFER, private_render_data.vbo);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);            // configure vbo metadata
-    glEnableVertexAttribArray(0);                                     // enable the config
-    glDrawArrays(GL_TRIANGLES, 0, private_render_data.vertex_count);  // draw call
+    glBindBuffer(GL_ARRAY_BUFFER, private_render_data.point_cloud_vbo);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                      // configure point_cloud_vbo metadata
+    glEnableVertexAttribArray(0);                                               // enable the config
+    glDrawArrays(GL_TRIANGLES, 0, private_render_data.point_cloud_vertex_count);            // draw call
+
+    // draw perimeter (if enabled)
+    if (private_render_data.flags & PrivateRenderDataFlagBits::perimeter_enabled) {
+        glBindBuffer(GL_ARRAY_BUFFER, private_render_data.perimeter_vbo);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                      // configure point_cloud_vbo metadata
+        glEnableVertexAttribArray(0);                                               // enable the config
+        glDrawArrays(GL_TRIANGLES, 0, private_render_data.perimeter_vertex_count);  // draw call
+    }
     glfwSwapBuffers(window);
 }
 
 // draws/updates the frame based on the data provided
+static
 void draw_window(GLFWwindow* window, PrivateRenderData data) {
+    // fortunately, _draw_window() already does the same, but renders from a global variable
+    // so after making sure the data is set up correctly...
     private_render_data = data;
-    _draw_window(window);
+    _draw_window(window);  // ... a single call is needed
 }
 
 int main(int argc, char** const argv) {
@@ -118,13 +139,6 @@ int main(int argc, char** const argv) {
         vbo.vertex_count = 0;
     }
 
-    glBindVertexArray(vao);                                                       // bind configuration object: remembers the global (buffer) state
-        // glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           // bind the buffer to the slot for how it will be used
-        // glBufferData(GL_ARRAY_BUFFER, sizeof(verticies), verticies, GL_STATIC_DRAW);  // send data to the gpu (with usage hints)
-        // glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
-        // glEnableVertexAttribArray(0);                                                 // enable the config
-    glBindVertexArray(0);                                                         // unbinding the buffers (safety?)
-
     // shaders:
     auto const vertex_shader_path   = binary_path + "/vertex.glsl";
     auto const fragment_shader_path = binary_path + "/fragment.glsl";
@@ -171,19 +185,21 @@ int main(int argc, char** const argv) {
     configure_features();
     size_t triangle_count = 0;
     uint_fast8_t current_active_buffer_id = 0;
+    std::vector<struct CursorPos> click_points;
     glfwSetWindowRefreshCallback(window, _draw_window);
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
-        auto const cursor_pos = get_cursor_pos(window);
+        auto cursor_pos = get_cursor_pos(window);
+        click_points.push_back(cursor_pos);
+        printf("{ %lf, %lf }\n", cursor_pos.x, cursor_pos.y);
+
         glBindVertexArray(vao);
 
         // GL buffer id of buffer with data being streamed in, in a background context
         uint_fast8_t const current_inactive_buffer_id = current_active_buffer_id ? 0 : 1;
         auto const current_active_buffer = [&]() -> GLBufferObject& { return vbos[current_active_buffer_id]; };
-        // bool compare_exchange_weak( T& expected, T desired,
-        //                             std::memory_order success,
-        //                             std::memory_order failure ) noexcept;
+
         GLBufferObject* null = nullptr;
         auto const buffer_swap_success = shared_render_data.inactive_buffer.compare_exchange_weak(
             null, &current_active_buffer(),
@@ -196,10 +212,11 @@ int main(int argc, char** const argv) {
 
         // ----------- drawing -----------
 
-        PrivateRenderData render_data;
+        PrivateRenderData render_data = {0};
+        render_data.flags = PrivateRenderDataFlagBits::perimeter_enabled;
         render_data.vao = vao;
-        render_data.vbo = current_active_buffer().vbo;
-        render_data.vertex_count = current_active_buffer().vertex_count;
+        render_data.point_cloud_vbo          = current_active_buffer().vbo;
+        render_data.point_cloud_vertex_count = current_active_buffer().vertex_count;
         render_data.program = program;
         draw_window(window, render_data);
         // logic time end

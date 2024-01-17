@@ -1,5 +1,5 @@
 // main logic of the program
-#define DEBUG_OUTPUT
+// #define DEBUG_OUTPUT
 #include <cstdio>
 #include <cstdint>
 #include <cassert>
@@ -57,7 +57,7 @@ ExposedRenderData shared_render_data;  // state of the GL thread exposed to othe
 // window redraw callback, do not call directly, use draw_point_cloud instead
 // assumes private render data contains all relevant correct data and *only draws (based on) said data to the screen*
 static
-void _draw_window(GLFWwindow* window) {
+void draw_window(GLFWwindow* window) {
     glfwMakeContextCurrent(window);
     // clear screen
     glClearColor(.1f, .1f, .1f, 5.f);
@@ -84,15 +84,6 @@ void _draw_window(GLFWwindow* window) {
         glDrawArrays(perimeter_info.draw_mode, perimeter_info.vertex_offset, perimeter_info.vertex_count);  // draw call
     }
     glfwSwapBuffers(window);
-}
-
-// draws/updates the frame based on the data provided
-static
-void draw_point_cloud(GLFWwindow* window, DrawCallInfo const data) {
-    // fortunately, _draw_window() already does the same, but renders from a global variable
-    // so after making sure the data is set up correctly...
-    private_render_data.point_cloud_draw_info = data;
-    _draw_window(window);  // ... a single call is needed
 }
 
 struct SizedVbo {
@@ -251,33 +242,31 @@ int main(int argc, char** const argv) {
     size_t triangle_count = 0;
     uint_fast8_t current_active_buffer_id = 0;
     std::vector<struct CursorPosition> click_points{};
-    glfwSetWindowRefreshCallback(window, _draw_window);
+    glfwSetWindowRefreshCallback(window, draw_window);
     // glfwSetMouseButtonCallback(window, handle_mouse_press);
     bool left_mouse_was_pressed = false;
     while (!glfwWindowShouldClose(window)) {
+        bool should_redraw = false;
         glfwPollEvents();
         bool const left_mouse_is_pressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
-        if (left_mouse_is_pressed && !left_mouse_was_pressed) {
+        if (left_mouse_is_pressed && (!left_mouse_was_pressed)) {
+            puts("button pressed");
+            should_redraw |= true;
             // update perimeter display
             // todo: wait for last transfer to finish before updating
             // clickpoints due to iterator invalidation
 
+            // setup draw info
             auto cursor_pos = get_cursor_pos(window);
             click_points.push_back(cursor_pos);
             auto& draw_info = private_render_data.perimeter_draw_info;
             draw_info.vao = perimeter_vao;
             glBindVertexArray(draw_info.vao);
-            print_gl_errors("bind array");
             glUseProgram(perimeter_program.program);
-            print_gl_errors("use program");
             glBindBuffer(GL_ARRAY_BUFFER, perimeter_vbo);
-            print_gl_errors("bind buffer");
             auto const vertex_count = convert_to_vbo(window, click_points, GL_ARRAY_BUFFER);
-            print_gl_errors("buffer data");
             glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
-            print_gl_errors("attribute setting");
             glEnableVertexAttribArray(0);
-            print_gl_errors("enable attribute");
 
             auto const vertex_count_for_drawing = vertex_count - (vertex_count%3);
             draw_info = {
@@ -286,13 +275,8 @@ int main(int argc, char** const argv) {
                 .vertex_offset = 0,
                 .vertex_count = vertex_count_for_drawing,
             };
-            glDrawArrays(draw_info.draw_mode, draw_info.vertex_offset, draw_info.vertex_count);  // draw call
-            glfwSwapBuffers(window);
-            print_gl_errors("draw call");
+            if (vertex_count_for_drawing != 0) private_render_data.flags |= PrivateRenderDataFlagBits::perimeter_enabled;
             glBindVertexArray(0);
-
-            if (vertex_count_for_drawing)
-                private_render_data.flags |= PrivateRenderDataFlagBits::perimeter_enabled;
         }
         left_mouse_was_pressed = left_mouse_is_pressed;
 
@@ -306,26 +290,30 @@ int main(int argc, char** const argv) {
             std::memory_order_acq_rel,
             std::memory_order_consume);
 
-        if (!buffer_swap_success)
-            continue;
-        current_active_buffer_id = current_inactive_buffer_id;
+        if (buffer_swap_success) {
+            should_redraw |= true;
+            current_active_buffer_id = current_inactive_buffer_id;
 
-        continue;
-        // ----------- drawing -----------
+            // ----------- drawing -----------
 
-        glBindVertexArray(point_cloud_vao);
-        glUseProgram(point_cloud_program.program);
-        glBindBuffer(GL_VERTEX_ARRAY, current_active_buffer().vbo);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);  // configure point_cloud_vbo metadata
-        glEnableVertexAttribArray(0);                           // enable the config
-        DrawCallInfo draw_info {
-            .draw_mode = GL_TRIANGLES,
-            .vao = point_cloud_vao,
-            .vertex_offset = 0,
-            .vertex_count = static_cast<GLuint>(current_active_buffer().vertex_count),
-        };
-        glBindVertexArray(0);
-        // draw_point_cloud(window, draw_info);
+            glBindVertexArray(point_cloud_vao);
+            glUseProgram(point_cloud_program.program);
+            glBindBuffer(GL_VERTEX_ARRAY, current_active_buffer().vbo);
+            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);  // configure point_cloud_vbo metadata
+            glEnableVertexAttribArray(0);                           // enable the config
+            DrawCallInfo draw_info {
+                .draw_mode = GL_TRIANGLES,
+                .vao = point_cloud_vao,
+                .vertex_offset = 0,
+                .vertex_count = static_cast<GLuint>(current_active_buffer().vertex_count),
+            };
+            glBindVertexArray(0);
+        }
+
+        if (should_redraw) {
+            puts("redrawing");
+            draw_window(window);
+        }
 
         // logic time end
         auto const t1 = std::chrono::steady_clock::now();
@@ -337,7 +325,7 @@ int main(int argc, char** const argv) {
         // end of frame time (printing is not included, *though it should be*)
         auto const t2 = std::chrono::steady_clock::now();
         auto const frametime = std::chrono::duration_cast<std::chrono::microseconds>(t2-t0);
-        sleep_duration_adjustment    = target_frametime-frametime;
+        sleep_duration_adjustment = target_frametime-frametime;
 #ifndef NODEBUG
         // printf("vbo handle: %d\n", current_active_buffer().vbo);
         // printf("tri_count:  %zu\n", triangle_count);

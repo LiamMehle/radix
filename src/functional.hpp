@@ -19,8 +19,8 @@ CursorPosition get_cursor_pos(GLFWwindow* w) {
     double x, y;
     glfwGetCursorPos(w, &x, &y);
     glfwGetWindowSize(w, &width, &height);
-    x = (x / width ) * 2 - 1;  // conversion from screen-pixel space to device-normal space
-    y = (y / height) * 2 - 1;
+    x =   (x / width ) * 2 - 1;  // conversion from screen-pixel space to device-normal space
+    y = -((y / height) * 2 - 1);
     x = max(x, -1.);
     y = max(y, -1.);
     x = min(x,  1.);

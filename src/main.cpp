@@ -8,7 +8,6 @@
 #include <vector>
 #include <thread>
 #include <filesystem>
-#include <fstream>
 #include <unistd.h>
 #include <ros/ros.h>
 #include <sensor_msgs/PointCloud2.h>
@@ -49,10 +48,20 @@ struct PrivateRenderData {
     DrawCallInfo point_cloud_draw_info;
     DrawCallInfo perimeter_draw_info;
 };
+struct SizedVbo {
+    GLuint vbo;
+    GLint vertex_count;
+};
 
 static
 PrivateRenderData private_render_data;
 ExposedRenderData shared_render_data;  // state of the GL thread exposed to other threads
+
+static
+void draw_entity(DrawCallInfo const draw_info) {
+    glBindVertexArray(draw_info.vao);
+    glDrawArrays(draw_info.draw_mode, draw_info.vertex_offset, draw_info.vertex_count);
+}
 
 // window redraw callback, do not call directly, use draw_point_cloud instead
 // assumes private render data contains all relevant correct data and *only draws (based on) said data to the screen*
@@ -63,109 +72,24 @@ void draw_window(GLFWwindow* window) {
     glClearColor(.1f, .1f, .1f, 5.f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    // draw point cloud
-    // glBindVertexArray(private_render_data.vao);
-    // glUseProgram(private_render_data.point_cloud_program);
-    // glBindBuffer(GL_ARRAY_BUFFER, private_render_data.point_cloud_vbo);
-    // glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                      // configure point_cloud_vbo metadata
-    // glEnableVertexAttribArray(0);                                               // enable the config
-    {
-        // all other info is baked into the vertex array
-        auto const pc_info = private_render_data.point_cloud_draw_info;
-        glBindVertexArray(pc_info.vao);
-        // glDrawArrays(pc_info.draw_mode, pc_info.vertex_offset, pc_info.vertex_count);  // draw call
-    }
+    draw_entity(private_render_data.point_cloud_draw_info);
 
     // draw perimeter (if enabled)
-    if (private_render_data.flags & PrivateRenderDataFlagBits::perimeter_enabled) {
-        // all other info is baked into the vertex array
-        auto const perimeter_info = private_render_data.perimeter_draw_info;
-        glBindVertexArray(perimeter_info.vao);
-        glDrawArrays(perimeter_info.draw_mode, perimeter_info.vertex_offset, perimeter_info.vertex_count);  // draw call
-    }
+    if (private_render_data.flags & PrivateRenderDataFlagBits::perimeter_enabled)
+        draw_entity(private_render_data.perimeter_draw_info);
+
     glfwSwapBuffers(window);
 }
 
-struct SizedVbo {
-    GLuint vbo;
-    GLint vertex_count;
-};
+template <typename T>
 static
-GLuint convert_to_vbo(GLFWwindow* window, std::vector<CursorPosition> const& points, GLenum const target) {
-    GLint const vertex_count = points.size();
-    GLint const required_buffer_size = 2*sizeof(float) * vertex_count;
-    glBufferData(target, required_buffer_size, points.data(), GL_STATIC_DRAW);
+GLuint convert_to_vbo(GLFWwindow* window, std::vector<T> const& verticies, GLenum const target) {
+    GLint const vertex_count = verticies.size();
+    GLint const required_buffer_size = sizeof(T) * vertex_count;
+    glBufferData(target, required_buffer_size, verticies.data(), GL_STATIC_DRAW);
     return vertex_count;
 }
 
-// static
-// void handle_mouse_press(GLFWwindow* window, int button, int action, int mods) {
-//     auto cursor_pos = get_cursor_pos(window);
-//     bool const new_point_defined = (button == GLFW_MOUSE_BUTTON_LEFT) && (action == GLFW_PRESS);
-//     if (!new_point_defined)
-//         return;
-//     private_render_data.click_points.push_back(cursor_pos);
-//     printf("{ %lf, %lf }\n", cursor_pos.x, cursor_pos.y);
-    
-//     auto& draw_info = private_render_data.perimeter_draw_info;
-//     glfwMakeContextCurrent(window);
-//     glBindVertexArray(draw_info.vao);
-//     glUseProgram(private_render_data.perimeter_program);
-//     glBindBuffer(GL_VERTEX_ARRAY, vbo.vbo);
-//     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
-//     glEnableVertexAttribArray(0);
-//     glBindVertexArray(0);
-//     draw_info = {
-//         .draw_mode = GL_TRIANGLES,
-//         .vao = draw_info.vao,
-//         .vertex_offset = 0,
-//         .vertex_count = static_cast<GLuint>(vbo.vertex_count),
-//     };
-//     // auto const pc_info = private_render_data.perimeter_draw_info;
-//     // glBindVertexArray(pc_info.vao);
-//     // glDrawArrays(pc_info.draw_mode, pc_info.vertex_offset, pc_info.vertex_count);  // draw call
-//     // private_render_data.perimeter_vertex_count = vbo.vertex_count;
-
-//     private_render_data.flags |= PrivateRenderDataFlagBits::perimeter_enabled;
-// }
-
-struct FullProgram {
-    GLint program;
-    GLint vertex_shader;
-    GLint fragment_shader;
-};
-
-FullProgram create_program_from_path(char const* const vertex_shader_src_path, char const* const fragment_shader_src_path) {
-    GLint program         = glCreateProgram();
-    GLint fragment_shader = shader_from_file(fragment_shader_src_path, GL_FRAGMENT_SHADER);
-    GLint vertex_shader   = shader_from_file(vertex_shader_src_path,   GL_VERTEX_SHADER);
-
-    glAttachShader(program, vertex_shader);
-    glAttachShader(program, fragment_shader);
-    glLinkProgram(program);
-
-    GLint result;
-    glGetProgramiv(program, GL_LINK_STATUS, &result);
-    if (!result) {
-        std::vector<GLchar> program_log(1024, 0);
-        glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
-        printf("[error]: %s\n", program_log.data());
-        return {0};
-    }
-    glValidateProgram(program);
-    glGetProgramiv(program, GL_VALIDATE_STATUS, &result);
-    if (!result) {
-        std::vector<GLchar> program_log(1024, 0);
-        glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
-        printf("[error]: %s\n", program_log.data());
-        return {0};
-    }
-    return {
-        .program         = program,
-        .vertex_shader   = vertex_shader,
-        .fragment_shader = fragment_shader,
-    };
-}
 
 int main(int argc, char** const argv) {
     ros::init(argc, argv, "radix_node");
@@ -250,7 +174,6 @@ int main(int argc, char** const argv) {
         glfwPollEvents();
         bool const left_mouse_is_pressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
         if (left_mouse_is_pressed && (!left_mouse_was_pressed)) {
-            puts("button pressed");
             should_redraw |= true;
             // update perimeter display
             // todo: wait for last transfer to finish before updating
@@ -264,7 +187,10 @@ int main(int argc, char** const argv) {
             glBindVertexArray(draw_info.vao);
             glUseProgram(perimeter_program.program);
             glBindBuffer(GL_ARRAY_BUFFER, perimeter_vbo);
-            auto const vertex_count = convert_to_vbo(window, click_points, GL_ARRAY_BUFFER);
+            GLuint const vertex_count = click_points.size();
+            GLuint const required_buffer_size = sizeof(click_points[0]) * vertex_count;
+            glBufferData(GL_ARRAY_BUFFER, required_buffer_size, click_points.data(), GL_STATIC_DRAW);
+
             glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
             glEnableVertexAttribArray(0);
 
@@ -311,10 +237,8 @@ int main(int argc, char** const argv) {
             glBindVertexArray(0);
         }
 
-        if (should_redraw) {
-            puts("redrawing");
+        if (should_redraw)
             draw_window(window);
-        }
 
         // logic time end
         auto const t1 = std::chrono::steady_clock::now();

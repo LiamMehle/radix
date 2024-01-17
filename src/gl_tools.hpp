@@ -1,8 +1,31 @@
 #pragma once
 
+#include <fstream>
 #include "gl.h"
 #include "utils.hpp"
 #include "raii.cpp"
+
+struct FullProgram {
+    GLint program;
+    GLint vertex_shader;
+    GLint fragment_shader;
+};
+
+#ifdef DEBUG_OUTPUT
+#include <cstdio>
+static inline
+GLenum print_gl_errors(char const* const where) {
+    GLenum error = glGetError();
+    while (error != GL_NO_ERROR) {
+        printf("%s:\t%s\n", where, gluErrorString(error));
+        error = glGetError();
+    }
+    return error;
+}
+#else
+static inline
+GLenum print_gl_errors(char const* const where){ return GL_NO_ERROR; }
+#endif
 
 static inline
 void configure_features() {
@@ -28,8 +51,7 @@ void configure_features() {
 
 // sets the vsync state to the boolean passed in
 // returns true on success
-static
-inline
+static inline
 bool set_vsync(bool const enabled) {
     typedef void (*glXSwapIntervalEXT_t)(Display *dpy, GLXDrawable drawable, int interval);
     
@@ -58,6 +80,7 @@ bool set_vsync(bool const enabled) {
     return true;
 }
 
+static inline
 std::string read_file(char const* const path) {
 
     // Open the file using ifstream
@@ -71,7 +94,7 @@ std::string read_file(char const* const path) {
     return buffer.str();
 }
 
-static
+static inline
 GLint compile_shader(std::string const& src, GLenum const type) {
     GLint shader = glCreateShader(type);
     GLint success;
@@ -89,7 +112,7 @@ GLint compile_shader(std::string const& src, GLenum const type) {
     return shader;
 }
 
-static
+static inline
 GLint shader_from_file(char const* filename, GLenum const type) {
     auto const source = read_file(filename);
     return compile_shader(source, type);
@@ -128,4 +151,37 @@ GLint create_program(char const* const vertex_shader_path, char const* const fra
         }
     }
     return program;
+}
+
+static inline
+FullProgram create_program_from_path(char const* const vertex_shader_src_path, char const* const fragment_shader_src_path) {
+    GLint program         = glCreateProgram();
+    GLint fragment_shader = shader_from_file(fragment_shader_src_path, GL_FRAGMENT_SHADER);
+    GLint vertex_shader   = shader_from_file(vertex_shader_src_path,   GL_VERTEX_SHADER);
+
+    glAttachShader(program, vertex_shader);
+    glAttachShader(program, fragment_shader);
+    glLinkProgram(program);
+
+    GLint result;
+    glGetProgramiv(program, GL_LINK_STATUS, &result);
+    if (!result) {
+        std::vector<GLchar> program_log(1024, 0);
+        glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
+        printf("[error]: %s\n", program_log.data());
+        return {0};
+    }
+    glValidateProgram(program);
+    glGetProgramiv(program, GL_VALIDATE_STATUS, &result);
+    if (!result) {
+        std::vector<GLchar> program_log(1024, 0);
+        glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
+        printf("[error]: %s\n", program_log.data());
+        return {0};
+    }
+    return {
+        .program         = program,
+        .vertex_shader   = vertex_shader,
+        .fragment_shader = fragment_shader,
+    };
 }

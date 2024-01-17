@@ -3,6 +3,7 @@
 #include "ros_event_loop.hpp"
 #include <sensor_msgs/PointCloud2.h>
 #include "global_config.hpp"
+#include "gl_tools.hpp"
 #include <chrono>
 
 

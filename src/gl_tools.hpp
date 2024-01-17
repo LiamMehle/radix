@@ -72,11 +72,11 @@ std::string read_file(char const* const path) {
 }
 
 static
-raii::Shader compile_shader(std::string const& src, GLenum const type) {
-    raii::Shader shader(type);
+GLint compile_shader(std::string const& src, GLenum const type) {
+    GLint shader = glCreateShader(type);
     GLint success;
     std::vector<GLchar> program_log(1024, 0);
-    auto source_ptr = src.c_str();  
+    auto source_ptr = src.c_str();
     auto source_len = src.size();
     glShaderSource(shader, 1, reinterpret_cast<GLchar const**>(&source_ptr), reinterpret_cast<GLint const*>(&source_len));
     glCompileShader(shader);
@@ -90,7 +90,42 @@ raii::Shader compile_shader(std::string const& src, GLenum const type) {
 }
 
 static
-raii::Shader shader_from_file(char const* filename, GLenum const type) {
+GLint shader_from_file(char const* filename, GLenum const type) {
     auto const source = read_file(filename);
     return compile_shader(source, type);
+}
+
+static inline
+GLint create_program(char const* const vertex_shader_path, char const* const fragment_shader_path) {
+    // shaders:
+    
+    raii::Program program{};
+    GLint vertex_shader   = shader_from_file(vertex_shader_path,   GL_VERTEX_SHADER);
+    GLint fragment_shader = shader_from_file(fragment_shader_path, GL_FRAGMENT_SHADER);
+    if (!vertex_shader || !fragment_shader)
+        return 5;
+
+    glAttachShader(program, vertex_shader);
+    glAttachShader(program, fragment_shader);
+    glLinkProgram(program);
+
+    {
+        GLint result;
+        glGetProgramiv(program, GL_LINK_STATUS, &result);
+        if (!result) {
+            std::vector<GLchar> program_log(1024, 0);
+            glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
+            printf("[error]: %s\n", program_log.data());
+            return 6;
+        }
+        glValidateProgram(program);
+        glGetProgramiv(program, GL_LINK_STATUS, &result);
+        if (!result) {
+            std::vector<GLchar> program_log(1024, 0);
+            glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
+            printf("[error]: %s\n", program_log.data());
+            return 7;
+        }
+    }
+    return program;
 }

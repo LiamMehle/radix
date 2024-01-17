@@ -32,7 +32,8 @@ namespace raii {
         GLFWwindow* window;
     public:
         Window(int width, int height, char const* const title, GLFWmonitor *monitor, GLFWwindow *share) {
-            window = glfwCreateWindow(width, height, title, monitor, share); }
+            this->window = glfwCreateWindow(width, height, title, monitor, share);
+        }
         // Window(Window other)  { this->window = other->window; }
         Window(Window&& other) { this->window = nullptr; swap(this->window, window); }
         ~Window() { glfwDestroyWindow(this->window); }

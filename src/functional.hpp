@@ -11,18 +11,22 @@ template<typename T>
 static inline constexpr
 auto abs(T const a) -> T { return a >= 0 ? a : -a; }
 
-struct CursorPos { double x, y; };
+struct CursorPosition { float x, y; };
+// gets the mouse location in device-normal space
 static inline
-CursorPos get_cursor_pos(GLFWwindow* w) {
-    CursorPos p;
+CursorPosition get_cursor_pos(GLFWwindow* w) {
     int width, height;
-    glfwGetCursorPos(w, &p.x, &p.y);
+    double x, y;
+    glfwGetCursorPos(w, &x, &y);
     glfwGetWindowSize(w, &width, &height);
-    p.x /= width;   // normalization
-    p.y /= height;
-    p.x = max(p.x, 0.);
-    p.y = max(p.y, 0.);
-    p.x = min(p.x, 1.);
-    p.y = min(p.y, 1.);
-    return p;
+    x = (x / width ) * 2 - 1;  // conversion from screen-pixel space to device-normal space
+    y = (y / height) * 2 - 1;
+    x = max(x, -1.);
+    y = max(y, -1.);
+    x = min(x,  1.);
+    y = min(y,  1.);
+    return {
+        .x=static_cast<float>(x),
+        .y=static_cast<float>(y),
+        };
 }

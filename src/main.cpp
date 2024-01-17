@@ -268,14 +268,15 @@ int main(int argc, char** const argv) {
             glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
             glEnableVertexAttribArray(0);
 
-            auto const vertex_count_for_drawing = vertex_count - (vertex_count%3);
+            auto const vertex_count_for_drawing = vertex_count;
             draw_info = {
-                .draw_mode = GL_TRIANGLES,
+                .draw_mode = GL_LINE_LOOP,
                 .vao = draw_info.vao,
                 .vertex_offset = 0,
                 .vertex_count = vertex_count_for_drawing,
             };
-            if (vertex_count_for_drawing != 0) private_render_data.flags |= PrivateRenderDataFlagBits::perimeter_enabled;
+            private_render_data.flags = (vertex_count_for_drawing != 0) * PrivateRenderDataFlagBits::perimeter_enabled
+                                      | (private_render_data.flags     & ~PrivateRenderDataFlagBits::perimeter_enabled);
             glBindVertexArray(0);
         }
         left_mouse_was_pressed = left_mouse_is_pressed;

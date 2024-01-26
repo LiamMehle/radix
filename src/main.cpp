@@ -56,11 +56,11 @@ struct TextRenderResource {
     GLuint vao;
     GLuint texture;
     GLuint vertex_buffer_object;
-    GLuint top_uniform_location;
-    GLuint left_uniform_location;
-    GLuint bottom_uniform_location;
-    GLuint right_uniform_location;
-    GLuint color_uniform_location;
+    GLint top_uniform_location;
+    GLint left_uniform_location;
+    GLint bottom_uniform_location;
+    GLint right_uniform_location;
+    GLint color_uniform_location;
 };
 
 static
@@ -197,8 +197,14 @@ int main(int argc, char** const argv) {
     // set up text rendering resource
     TextRenderResource text_rendering_resource = {
         .program = text_program,
+        .vao = 0,
         .texture = 0,
         .vertex_buffer_object = 0,
+        .top_uniform_location    = glGetUniformLocation(text_program.program, "top"),
+        .left_uniform_location   = glGetUniformLocation(text_program.program, "left"),
+        .bottom_uniform_location = glGetUniformLocation(text_program.program, "bottom"),
+        .right_uniform_location  = glGetUniformLocation(text_program.program, "right"),
+        .color_uniform_location  = glGetUniformLocation(text_program.program, "color"),
     };
     glGenVertexArrays(1, &text_rendering_resource.vao);
     glGenTextures(1, &text_rendering_resource.texture);
@@ -206,18 +212,24 @@ int main(int argc, char** const argv) {
     glBindBuffer(GL_VERTEX_ARRAY, text_rendering_resource.vertex_buffer_object);
     // done setting up text rendering resource
 
-    auto const render_character_bitmap = [text_rendering_resource](FT_Bitmap const* const bitmap, auto const left, auto const top) {
+    auto const render_character_bitmap = [text_rendering_resource](FT_Bitmap const* const bitmap, auto const left, auto const top, auto const right, auto const bottom) {
         // freetype suggestions:
         // - linear blending
         // - bitmap is applied to alpha
-        glBindVertexArray(text_rendering_resource.vao);
-        glActiveTexture(GL_TEXTURE0, 0);
-        glBindTexture(GL_TEXTURE_2D, text_rendering_resource.texture);
+        auto const r = text_rendering_resource;
+        glBindVertexArray(r.vao);
+        glActiveTexture(GL_TEXTURE0 + 0);
+        glBindTexture(GL_TEXTURE_2D, r.texture);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, bitmap->width, bitmap->rows, 0, GL_RED, GL_UNSIGNED_BYTE, bitmap->buffer);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glEnable( GL_BLEND );
-        
-        glDrawArrays()
+        glUniform1f(r.top_uniform_location,    top);
+        glUniform1f(r.left_uniform_location,   left);
+        glUniform1f(r.bottom_uniform_location, bottom);
+        glUniform1f(r.right_uniform_location,  right);
+        glUniform3f(r.color_uniform_location,  0.f, 0.f, 0.f);
+        glEnable(GL_BLEND);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glBindVertexArray(0);
     };
 
     while (!glfwWindowShouldClose(window)) {

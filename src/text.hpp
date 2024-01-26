@@ -6,10 +6,20 @@
 // where f is callable
 template<typename F>
 static inline
-void render_char(FT_Face const face, char* const text, std::size_t const num_chars, F const draw_bitmap) {
+void render_char(
+    FT_Face const face,
+    char* const text,
+    std::size_t const num_chars,
+    float const left,
+    float const top,
+    float const width,
+    float const height,
+    float const size_of_pixel,
+    F const draw_bitmap) {
+
     int pen_x = 300;
     int pen_y = 200;
-    T_GlyphSlot slot = face->glyph;
+    FT_GlyphSlot slot = face->glyph;
     for (int n = 0; n < num_chars; n++) {
         FT_Error error;
         FT_UInt glyph_index;
@@ -29,9 +39,17 @@ void render_char(FT_Face const face, char* const text, std::size_t const num_cha
             continue;
 
         /* now, draw to our target surface */
+        auto const screen_left = pen_x + slot->bitmap_left;
+        auto const screen_top = -(pen_y - slot->bitmap_top);
+        auto const device_left = screen_left * size_of_pixel;
+        auto const device_top = screen_top * size_of_pixel;
+        auto const device_right = device_left + width;
+        auto const device_bottom = device_top - height;
         draw_bitmap(&slot->bitmap,
-                    pen_x + slot->bitmap_left,
-                    pen_y - slot->bitmap_top);
+                    device_left,
+                    device_top,
+                    device_right,
+                    device_bottom);
 
         /* increment pen position */
         pen_x += slot->advance.x >> 6;

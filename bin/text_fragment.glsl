@@ -10,6 +10,6 @@ void main() {
     vec2 min_coords = vec2(right, top);
     vec2 max_coords = vec2(left, bottom);
     vec2 text_relative_position = (gl_FragCoord.xy - min_coords) / (max_coords-min_coords);
-    float alpha = texture(text_bitmap, text_relative_position).x;
+    float alpha = texture(text_bitmap, text_relative_position).r;
     out_color = vec4(color, alpha);
 }

@@ -6,8 +6,8 @@
 #include <cstring>
 #include <string>
 #include <vector>
-#include <thread>
-#include <filesystem>
+    #include <thread>
+    #include <filesystem>
 #include <unistd.h>
 #include <ros/ros.h>
 #include <sensor_msgs/PointCloud2.h>
@@ -115,6 +115,7 @@ int main(int argc, char** const argv) {
         std::puts("failed to acquire faccia");
         return 2;
     }
+    FT_Set_Char_Size(face, 11*64, 11*64, 300,300);
 
 
     ros::init(argc, argv, "radix_node");
@@ -177,8 +178,8 @@ int main(int argc, char** const argv) {
     auto const point_cloud_fragment_shader_path = binary_path + "/point_cloud_fragment.glsl";
     auto const perimeter_vertex_shader_path     = binary_path + "/perimeter_vertex.glsl";
     auto const perimeter_fragment_shader_path   = binary_path + "/perimeter_fragment.glsl";
-    auto const text_vertex_shader_path   = binary_path + "/text_vertex.glsl";
-    auto const text_fragment_shader_path   = binary_path + "/text_fragment.glsl";
+    auto const text_vertex_shader_path          = binary_path + "/text_vertex.glsl";
+    auto const text_fragment_shader_path        = binary_path + "/text_fragment.glsl";
     FullProgram const point_cloud_program = create_program_from_path(point_cloud_vertex_shader_path.c_str(), point_cloud_fragment_shader_path.c_str());
     FullProgram const perimeter_program   = create_program_from_path(perimeter_vertex_shader_path.c_str(), perimeter_fragment_shader_path.c_str());
     FullProgram const text_program        = create_program_from_path(text_vertex_shader_path.c_str(), text_fragment_shader_path.c_str());
@@ -224,9 +225,14 @@ int main(int argc, char** const argv) {
         // - linear blending
         // - bitmap is applied to alpha
         auto const r = text_rendering_resource;
+        print_gl_errors("early");
         glBindVertexArray(r.vao);
+        print_gl_errors("bind vao");
+        glUseProgram(r.program.program);
+        print_gl_errors("program");
 
-        glBindBuffer(GL_VERTEX_ARRAY, r.vertex_buffer_object);
+        glBindBuffer(GL_ARRAY_BUFFER, r.vertex_buffer_object);
+        print_gl_errors("bind buffer");
         float billboard[] = {
             left, top,
             left, bottom,
@@ -235,64 +241,83 @@ int main(int argc, char** const argv) {
             left, bottom,
             right, bottom
         };
-        glBufferData(GL_VERTEX_ARRAY, 6*2, &billboard, GL_STREAM_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(billboard), &billboard, GL_STREAM_DRAW);
+        print_gl_errors("buffer data");
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        print_gl_errors("vertex attrib pointer");
         glEnableVertexAttribArray(0);
+        print_gl_errors("enable attrib");
 
-        glBindSampler(0, r.sampler);
-        glActiveTexture(GL_TEXTURE0 + 0);
+        glActiveTexture(GL_TEXTURE0);
+        print_gl_errors("active texture unit");
         glBindTexture(GL_TEXTURE_2D, r.texture);
+        print_gl_errors("bind texture unit");
+        glBindSampler(0, r.sampler);
+        print_gl_errors("bind sampler");
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, bitmap->width, bitmap->rows, 0, GL_RED, GL_UNSIGNED_BYTE, bitmap->buffer);
+        print_gl_errors("load bitmap");
+        glEnable(GL_COLOR_LOGIC_OP);
+        glLogicOp(GL_COPY);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        print_gl_errors("blend func");
 
+        glUniform1i(r.sampler, 0);
+        print_gl_errors("uniform sampler");
         glUniform1f(r.top_uniform_location,    top);
+        print_gl_errors("uniform1");
         glUniform1f(r.left_uniform_location,   left);
+        print_gl_errors("uniform2");
         glUniform1f(r.bottom_uniform_location, bottom);
+        print_gl_errors("uniform3");
         glUniform1f(r.right_uniform_location,  right);
+        print_gl_errors("uniform4");
         glUniform3f(r.color_uniform_location,  1.f, 1.f, 1.f);
+        print_gl_errors("uniform5");
         glEnable(GL_BLEND);
-        glDrawArrays(GL_TRIANGLES, 0, 6*2);
+        print_gl_errors("enable blend");
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        print_gl_errors("draw");
         glBindVertexArray(0);
     };
 
     while (!glfwWindowShouldClose(window)) {
         bool should_redraw = false;
         glfwPollEvents();
-        bool const left_mouse_is_pressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
-        if (left_mouse_is_pressed && (!left_mouse_was_pressed)) {
-            should_redraw |= true;
-            // update perimeter display
-            // todo: wait for last transfer to finish before updating
-            // clickpoints due to iterator invalidation
+        // bool const left_mouse_is_pressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+        // if (left_mouse_is_pressed && (!left_mouse_was_pressed)) {
+        //     should_redraw |= true;
+        //     // update perimeter display
+        //     // todo: wait for last transfer to finish before updating
+        //     // clickpoints due to iterator invalidation
 
-            // setup draw info
-            auto cursor_pos = get_cursor_pos(window);
-            click_points.push_back(cursor_pos);
-            auto& draw_info = private_render_data.perimeter_draw_info;
-            draw_info.vao = perimeter_vao;
-            glBindVertexArray(draw_info.vao);
-            configure_features();
-            glUseProgram(perimeter_program.program);
-            glBindBuffer(GL_ARRAY_BUFFER, perimeter_vbo);
-            GLuint const vertex_count = click_points.size();
-            GLuint const required_buffer_size = sizeof(click_points[0]) * vertex_count;
-            glBufferData(GL_ARRAY_BUFFER, required_buffer_size, click_points.data(), GL_DYNAMIC_DRAW);
+        //     // setup draw info
+        //     auto cursor_pos = get_cursor_pos(window);
+        //     click_points.push_back(cursor_pos);
+        //     auto& draw_info = private_render_data.perimeter_draw_info;
+        //     draw_info.vao = perimeter_vao;
+        //     glBindVertexArray(draw_info.vao);
+        //     configure_features();
+        //     glUseProgram(perimeter_program.program);
+        //     glBindBuffer(GL_ARRAY_BUFFER, perimeter_vbo);
+        //     GLuint const vertex_count = click_points.size();
+        //     GLuint const required_buffer_size = sizeof(click_points[0]) * vertex_count;
+        //     glBufferData(GL_ARRAY_BUFFER, required_buffer_size, click_points.data(), GL_DYNAMIC_DRAW);
 
-            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
-            glEnableVertexAttribArray(0);
+        //     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        //     glEnableVertexAttribArray(0);
 
-            auto const vertex_count_for_drawing = vertex_count;
-            draw_info = {
-                .draw_mode = GL_LINE_LOOP,
-                .vao = draw_info.vao,
-                .vertex_offset = 0,
-                .vertex_count = vertex_count_for_drawing,
-            };
-            private_render_data.flags = (vertex_count_for_drawing != 0) * PrivateRenderDataFlagBits::perimeter_enabled
-                                      | (private_render_data.flags     & ~PrivateRenderDataFlagBits::perimeter_enabled);
-            glBindVertexArray(0);
-        }
-        left_mouse_was_pressed = left_mouse_is_pressed;
+        //     auto const vertex_count_for_drawing = vertex_count;
+        //     draw_info = {
+        //         .draw_mode = GL_LINE_LOOP,
+        //         .vao = draw_info.vao,
+        //         .vertex_offset = 0,
+        //         .vertex_count = vertex_count_for_drawing,
+        //     };
+        //     private_render_data.flags = (vertex_count_for_drawing != 0) * PrivateRenderDataFlagBits::perimeter_enabled
+        //                               | (private_render_data.flags     & ~PrivateRenderDataFlagBits::perimeter_enabled);
+        //     glBindVertexArray(0);
+        // }
+        // left_mouse_was_pressed = left_mouse_is_pressed;
 
         // GL buffer id of buffer with data being streamed in, in a background context
         uint_fast8_t const current_inactive_buffer_id = current_active_buffer_id ? 0 : 1;
@@ -334,16 +359,17 @@ int main(int argc, char** const argv) {
         render_char(
             face,
             text,
-            sizeof(text)-1,
-            -1.f,
-            -1.f,
-            1.f/64.f,
+            2,
+            0,
+            0,
+            1.f/1024.f,
             render_character_bitmap
         );
 
-        if (should_redraw)
-            draw_window(window);
         glfwSwapBuffers(window);
+
+        // if (should_redraw)
+        //     draw_window(window);
 
         // logic time end
         auto const t1 = std::chrono::steady_clock::now();

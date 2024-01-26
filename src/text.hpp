@@ -15,8 +15,8 @@ void render_char(
     float const size_of_pixel,
     F const draw_bitmap) {
 
-    int pen_x = 300;
-    int pen_y = 200;
+    int pen_x = 0;
+    int pen_y = 0;
     FT_GlyphSlot slot = face->glyph;
     for (int n = 0; n < num_chars; n++) {
         FT_Error error;
@@ -38,11 +38,11 @@ void render_char(
 
         /* now, draw to our target surface */
         auto const screen_left = pen_x + slot->bitmap_left;
-        auto const screen_top = -(pen_y - slot->bitmap_top);
-        auto const device_left = screen_left * size_of_pixel;
-        auto const device_top = screen_top * size_of_pixel;
+        auto const screen_top = pen_y;// - slot->bitmap_top;
         auto const width  = slot->bitmap.width * size_of_pixel;
         auto const height = slot->bitmap.rows * size_of_pixel;
+        auto const device_left = screen_left * size_of_pixel;
+        auto const device_top = screen_top * size_of_pixel;
         auto const device_right = device_left + width;
         auto const device_bottom = device_top - height;
         draw_bitmap(&slot->bitmap,

@@ -18,6 +18,7 @@
 #include "functional.hpp"
 #include "global_config.hpp"
 #include "ros_event_loop.hpp"
+#include "text.hpp"
 
 static
 void error_callback(int, const char* err_str) {
@@ -56,11 +57,13 @@ struct TextRenderResource {
     GLuint vao;
     GLuint texture;
     GLuint vertex_buffer_object;
+    GLuint sampler;
     GLint top_uniform_location;
     GLint left_uniform_location;
     GLint bottom_uniform_location;
     GLint right_uniform_location;
     GLint color_uniform_location;
+    GLint sampler_uniform_location;
 };
 
 static
@@ -79,8 +82,8 @@ static
 void draw_window(GLFWwindow* window) {
     glfwMakeContextCurrent(window);
     // clear screen
-    glClearColor(.1f, .1f, .1f, 5.f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    // glClearColor(.1f, .1f, .1f, 5.f);
+    // glClear(GL_COLOR_BUFFER_BIT);
 
     draw_entity(private_render_data.point_cloud_draw_info);
 
@@ -108,7 +111,7 @@ int main(int argc, char** const argv) {
         return 1;
     }
     FT_Face face;
-    if (FT_New_Face(library, "/usr/share/fonts/truetype/arial.ttf", 0, &face )) {
+    if (FT_New_Face(library, "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSans.ttf", 0, &face )) {
         std::puts("failed to acquire faccia");
         return 2;
     }
@@ -195,21 +198,25 @@ int main(int argc, char** const argv) {
     bool left_mouse_was_pressed = false;
 
     // set up text rendering resource
+    GLuint sampler;
+    glGenSamplers(1, &sampler);
+
     TextRenderResource text_rendering_resource = {
         .program = text_program,
         .vao = 0,
         .texture = 0,
         .vertex_buffer_object = 0,
+        .sampler = sampler,
         .top_uniform_location    = glGetUniformLocation(text_program.program, "top"),
         .left_uniform_location   = glGetUniformLocation(text_program.program, "left"),
         .bottom_uniform_location = glGetUniformLocation(text_program.program, "bottom"),
         .right_uniform_location  = glGetUniformLocation(text_program.program, "right"),
         .color_uniform_location  = glGetUniformLocation(text_program.program, "color"),
+        .sampler_uniform_location = glGetUniformLocation(text_program.program, "text_bitmap"),
     };
     glGenVertexArrays(1, &text_rendering_resource.vao);
     glGenTextures(1, &text_rendering_resource.texture);
     glGenBuffers(1, &text_rendering_resource.vertex_buffer_object);
-    glBindBuffer(GL_VERTEX_ARRAY, text_rendering_resource.vertex_buffer_object);
     // done setting up text rendering resource
 
     auto const render_character_bitmap = [text_rendering_resource](FT_Bitmap const* const bitmap, auto const left, auto const top, auto const right, auto const bottom) {
@@ -218,17 +225,33 @@ int main(int argc, char** const argv) {
         // - bitmap is applied to alpha
         auto const r = text_rendering_resource;
         glBindVertexArray(r.vao);
+
+        glBindBuffer(GL_VERTEX_ARRAY, r.vertex_buffer_object);
+        float billboard[] = {
+            left, top,
+            left, bottom,
+            right, top,
+            right, top,
+            left, bottom,
+            right, bottom
+        };
+        glBufferData(GL_VERTEX_ARRAY, 6*2, &billboard, GL_STREAM_DRAW);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        glEnableVertexAttribArray(0);
+
+        glBindSampler(0, r.sampler);
         glActiveTexture(GL_TEXTURE0 + 0);
         glBindTexture(GL_TEXTURE_2D, r.texture);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, bitmap->width, bitmap->rows, 0, GL_RED, GL_UNSIGNED_BYTE, bitmap->buffer);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
         glUniform1f(r.top_uniform_location,    top);
         glUniform1f(r.left_uniform_location,   left);
         glUniform1f(r.bottom_uniform_location, bottom);
         glUniform1f(r.right_uniform_location,  right);
-        glUniform3f(r.color_uniform_location,  0.f, 0.f, 0.f);
+        glUniform3f(r.color_uniform_location,  1.f, 1.f, 1.f);
         glEnable(GL_BLEND);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glDrawArrays(GL_TRIANGLES, 0, 6*2);
         glBindVertexArray(0);
     };
 
@@ -302,8 +325,25 @@ int main(int argc, char** const argv) {
             glBindVertexArray(0);
         }
 
+        // temp rendering code
+        glClearColor(.1f, .1f, .1f, 5.f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        // test drawing text
+        char text[] = "hi";
+        render_char(
+            face,
+            text,
+            sizeof(text)-1,
+            -1.f,
+            -1.f,
+            1.f/64.f,
+            render_character_bitmap
+        );
+
         if (should_redraw)
             draw_window(window);
+        glfwSwapBuffers(window);
 
         // logic time end
         auto const t1 = std::chrono::steady_clock::now();

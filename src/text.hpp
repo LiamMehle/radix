@@ -12,8 +12,6 @@ void render_char(
     std::size_t const num_chars,
     float const left,
     float const top,
-    float const width,
-    float const height,
     float const size_of_pixel,
     F const draw_bitmap) {
 
@@ -43,6 +41,8 @@ void render_char(
         auto const screen_top = -(pen_y - slot->bitmap_top);
         auto const device_left = screen_left * size_of_pixel;
         auto const device_top = screen_top * size_of_pixel;
+        auto const width  = slot->bitmap.width * size_of_pixel;
+        auto const height = slot->bitmap.rows * size_of_pixel;
         auto const device_right = device_left + width;
         auto const device_bottom = device_top - height;
         draw_bitmap(&slot->bitmap,

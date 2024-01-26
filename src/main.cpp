@@ -21,17 +21,16 @@
 
 static
 void error_callback(int, const char* err_str) {
-    printf("GLFW Error: %s\n", err_str);
+   std::printf("GLFW Error: %s\n", err_str);
 }
 
 namespace fs = std::filesystem;
 std::string binary_path = fs::canonical("/proc/self/exe").parent_path();
 static
 int x_error_handler(Display* display, XErrorEvent* event) {
-    puts("a");
+    std::puts("a");
     return 0;
 }
-
 
 // data used for rendering of a frame
 enum PrivateRenderDataFlagBits {
@@ -51,6 +50,17 @@ struct PrivateRenderData {
 struct SizedVbo {
     GLuint vbo;
     GLint vertex_count;
+};
+struct TextRenderResource {
+    FullProgram program;
+    GLuint vao;
+    GLuint texture;
+    GLuint vertex_buffer_object;
+    GLuint top_uniform_location;
+    GLuint left_uniform_location;
+    GLuint bottom_uniform_location;
+    GLuint right_uniform_location;
+    GLuint color_uniform_location;
 };
 
 static
@@ -92,14 +102,26 @@ GLuint convert_to_vbo(GLFWwindow* window, std::vector<T> const& verticies, GLenu
 
 
 int main(int argc, char** const argv) {
+    FT_Library library;
+    if (FT_Init_FreeType(&library)) {
+        std::puts("failed to initialize freetype");
+        return 1;
+    }
+    FT_Face face;
+    if (FT_New_Face(library, "/usr/share/fonts/truetype/arial.ttf", 0, &face )) {
+        std::puts("failed to acquire faccia");
+        return 2;
+    }
+
+
     ros::init(argc, argv, "radix_node");
     // initialize OpenGL
     int status = 0;
     glfwSetErrorCallback(error_callback);
     raii::GLFW glfw{};
     if (glfw != GLFW_TRUE) {
-        puts("failed to initialize glfw");
-        return 1;
+        std::puts("failed to initialize glfw");
+        return 3;
     }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
@@ -108,8 +130,8 @@ int main(int argc, char** const argv) {
 
     raii::Window window = raii::Window(WIDTH, HEIGHT, "Radix", nullptr, nullptr);
     if (!static_cast<GLFWwindow*>(window)) {
-        puts("failed to create a window");
-        return 2;
+        std::puts("failed to create a window");
+        return 4;
     }
     glfwSetInputMode(window, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
 
@@ -122,15 +144,15 @@ int main(int argc, char** const argv) {
 
     glfwMakeContextCurrent(window);
 #ifndef NODEBUG
-    printf("vendor:   %s\n", reinterpret_cast<char const*>(glGetString(GL_VENDOR)));
-    printf("renderer: %s\n", reinterpret_cast<char const*>(glGetString(GL_RENDERER)));
+    std::printf("vendor:   %s\n", reinterpret_cast<char const*>(glGetString(GL_VENDOR)));
+    std::printf("renderer: %s\n", reinterpret_cast<char const*>(glGetString(GL_RENDERER)));
 #endif
 
     glewExperimental = GL_TRUE;
 
     if (glewInit() != GLEW_OK) {
-        puts("failed to init glew");
-        return 3;
+        std::puts("failed to init glew");
+        return 5;
     }
 
     glViewport(0, 0, frame_buffer_width, frame_buffer_height);
@@ -152,8 +174,11 @@ int main(int argc, char** const argv) {
     auto const point_cloud_fragment_shader_path = binary_path + "/point_cloud_fragment.glsl";
     auto const perimeter_vertex_shader_path     = binary_path + "/perimeter_vertex.glsl";
     auto const perimeter_fragment_shader_path   = binary_path + "/perimeter_fragment.glsl";
+    auto const text_vertex_shader_path   = binary_path + "/text_vertex.glsl";
+    auto const text_fragment_shader_path   = binary_path + "/text_fragment.glsl";
     FullProgram const point_cloud_program = create_program_from_path(point_cloud_vertex_shader_path.c_str(), point_cloud_fragment_shader_path.c_str());
     FullProgram const perimeter_program   = create_program_from_path(perimeter_vertex_shader_path.c_str(), perimeter_fragment_shader_path.c_str());
+    FullProgram const text_program        = create_program_from_path(text_vertex_shader_path.c_str(), text_fragment_shader_path.c_str());
     // enable vsync if present:
     // set_vsync(true);
 
@@ -162,13 +187,39 @@ int main(int argc, char** const argv) {
     auto t0 = std::chrono::steady_clock::now();
     auto sleep_duration_adjustment = 0us;
     bool data_is_loaded = false;
-    configure_features();
-    size_t triangle_count = 0;
+    std::size_t triangle_count = 0;
     uint_fast8_t current_active_buffer_id = 0;
     std::vector<struct CursorPosition> click_points{};
     glfwSetWindowRefreshCallback(window, draw_window);
     // glfwSetMouseButtonCallback(window, handle_mouse_press);
     bool left_mouse_was_pressed = false;
+
+    // set up text rendering resource
+    TextRenderResource text_rendering_resource = {
+        .program = text_program,
+        .texture = 0,
+        .vertex_buffer_object = 0,
+    };
+    glGenVertexArrays(1, &text_rendering_resource.vao);
+    glGenTextures(1, &text_rendering_resource.texture);
+    glGenBuffers(1, &text_rendering_resource.vertex_buffer_object);
+    glBindBuffer(GL_VERTEX_ARRAY, text_rendering_resource.vertex_buffer_object);
+    // done setting up text rendering resource
+
+    auto const render_character_bitmap = [text_rendering_resource](FT_Bitmap const* const bitmap, auto const left, auto const top) {
+        // freetype suggestions:
+        // - linear blending
+        // - bitmap is applied to alpha
+        glBindVertexArray(text_rendering_resource.vao);
+        glActiveTexture(GL_TEXTURE0, 0);
+        glBindTexture(GL_TEXTURE_2D, text_rendering_resource.texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, bitmap->width, bitmap->rows, 0, GL_RED, GL_UNSIGNED_BYTE, bitmap->buffer);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glEnable( GL_BLEND );
+        
+        glDrawArrays()
+    };
+
     while (!glfwWindowShouldClose(window)) {
         bool should_redraw = false;
         glfwPollEvents();
@@ -185,11 +236,12 @@ int main(int argc, char** const argv) {
             auto& draw_info = private_render_data.perimeter_draw_info;
             draw_info.vao = perimeter_vao;
             glBindVertexArray(draw_info.vao);
+            configure_features();
             glUseProgram(perimeter_program.program);
             glBindBuffer(GL_ARRAY_BUFFER, perimeter_vbo);
             GLuint const vertex_count = click_points.size();
             GLuint const required_buffer_size = sizeof(click_points[0]) * vertex_count;
-            glBufferData(GL_ARRAY_BUFFER, required_buffer_size, click_points.data(), GL_STATIC_DRAW);
+            glBufferData(GL_ARRAY_BUFFER, required_buffer_size, click_points.data(), GL_DYNAMIC_DRAW);
 
             glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
             glEnableVertexAttribArray(0);
@@ -224,6 +276,7 @@ int main(int argc, char** const argv) {
             // ----------- drawing -----------
 
             glBindVertexArray(point_cloud_vao);
+            configure_features();
             glUseProgram(point_cloud_program.program);
             glBindBuffer(GL_VERTEX_ARRAY, current_active_buffer().vbo);
             glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);  // configure point_cloud_vbo metadata
@@ -251,14 +304,16 @@ int main(int argc, char** const argv) {
         auto const t2 = std::chrono::steady_clock::now();
         auto const frametime = std::chrono::duration_cast<std::chrono::microseconds>(t2-t0);
         sleep_duration_adjustment = target_frametime-frametime;
-#ifndef NODEBUG
-        // printf("vbo handle: %d\n", current_active_buffer().vbo);
-        // printf("tri_count:  %zu\n", triangle_count);
-        // printf("logic_time: %li us\n", logic_time.count());
-        // printf("frame_time: %li us\n", frametime.count());
-        // printf("adjustment: %li us\n", sleep_duration_adjustment.count());
-        // printf("fps:        %li\n", 1000000/frametime.count());
-        // printf("---------------------\n");
+#ifdef DEBUG_OUTPUT
+#ifdef FPS
+        std::printf("vbo handle: %d\n", current_active_buffer().vbo);
+        std::printf("tri_count:  %zu\n", triangle_count);
+        std::printf("logic_time: %li us\n", logic_time.count());
+        std::printf("frame_time: %li us\n", frametime.count());
+        std::printf("adjustment: %li us\n", sleep_duration_adjustment.count());
+        std::printf("fps:        %li\n", 1000000/frametime.count());
+        std::printf("---------------------\n");
+#endif
 #endif
         t0 = t2;
     }

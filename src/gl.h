@@ -6,3 +6,5 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <GL/glx.h>
 #include <X11/Xlib.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H

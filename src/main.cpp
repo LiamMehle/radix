@@ -213,7 +213,7 @@ int main(int argc, char** const argv) {
     glGenBuffers(1, &text_rendering_resource.vertex_buffer_object);
     // done setting up text rendering resource
 
-    auto const render_character_bitmap = [text_rendering_resource](FT_Bitmap const* const bitmap, auto const left, auto const top, auto const right, auto const bottom) {
+    auto const render_character_bitmap = [text_rendering_resource](Bitmap const& bitmap, auto const left, auto const top, auto const right, auto const bottom) {
         #define debug_invoke(x, ...) x(__VA_ARGS__); print_gl_errors(#x)
         // freetype suggestions:
         // - linear blending
@@ -238,7 +238,7 @@ int main(int argc, char** const argv) {
         debug_invoke(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         debug_invoke(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         debug_invoke(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        debug_invoke(glTexImage2D, GL_TEXTURE_2D, 0, GL_RED, bitmap->width, bitmap->rows, 0, GL_RED, GL_UNSIGNED_BYTE, bitmap->buffer);  // the texture is uploaded
+        debug_invoke(glTexImage2D, GL_TEXTURE_2D, 0, GL_RED, bitmap.width, bitmap.height, 0, GL_RED, GL_UNSIGNED_BYTE, bitmap.data.data());  // the texture is uploaded
         debug_invoke(glActiveTexture, GL_TEXTURE0);                  // selects the active texture UNIT, not texture itself
         debug_invoke(glBindTexture, GL_TEXTURE_2D, r.texture);       // a texture is bound to the texture UNIT
         // debug_invoke(glBindSampler, 0, r.sampler);                // a sampler id is bound to the sampler. A sampler is a mechanism that fetches the underlaying data and transforms is in some specified way
@@ -250,6 +250,8 @@ int main(int argc, char** const argv) {
         glDrawArrays(GL_TRIANGLES, 0, 6);
         glBindVertexArray(0);
     };
+
+    auto const charset = load_charset<0, 128>(face);
 
     while (!glfwWindowShouldClose(window)) {
         bool should_redraw = false;
@@ -327,15 +329,19 @@ int main(int argc, char** const argv) {
 
         // test drawing text
         char text[] = "hi";
-        render_char(
-            face,
-            text,
-            2,
-            0,
-            0,
-            1.f/128.f,
-            render_character_bitmap
-        );
+        auto left = 0.f;
+        auto top = 0.f;
+        auto pixel_size = 0.01f;
+        for (auto const& c : text) {
+            auto const optional_bitmap = charset.bitmap[c];
+            if (optional_bitmap.has_value()) {
+                auto const bitmap = optional_bitmap.value();
+                auto const width = bitmap.width * pixel_size;
+                auto const height = bitmap.height * pixel_size;
+                render_character_bitmap(bitmap, left, top, left+width, top+height);
+                left += width;
+            }
+        }
 
         glfwSwapBuffers(window);
 

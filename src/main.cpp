@@ -186,7 +186,6 @@ int main(int argc, char** const argv) {
     // enable vsync if present:
     // set_vsync(true);
 
-    print_gl_errors("early3");
 
     using namespace std::chrono_literals;
     auto constexpr target_frametime = (1000000us)/global_base_rate;
@@ -201,34 +200,27 @@ int main(int argc, char** const argv) {
     bool left_mouse_was_pressed = false;
 
     // set up text rendering resource
-    GLuint sampler;
-    glGenSamplers(1, &sampler);
-    print_gl_errors("gen sampler");
-
     TextRenderResource text_rendering_resource = {
         .program = text_program,
         .vao = 0,
         .texture = 0,
         .vertex_buffer_object = 0,
-        .sampler = sampler,
+        .sampler_uniform_location = glGetUniformLocation(text_program.program, "text_bitmap"),
     };
     glGenVertexArrays(1, &text_rendering_resource.vao);
-    print_gl_errors("gen vao");
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glGenTextures(1, &text_rendering_resource.texture);
-    print_gl_errors("gen texture");
     glGenBuffers(1, &text_rendering_resource.vertex_buffer_object);
-    print_gl_errors("gen buffer");
     // done setting up text rendering resource
 
     auto const render_character_bitmap = [text_rendering_resource](FT_Bitmap const* const bitmap, auto const left, auto const top, auto const right, auto const bottom) {
+        #define debug_invoke(x, ...) x(__VA_ARGS__); print_gl_errors(#x)
         // freetype suggestions:
         // - linear blending
         // - bitmap is applied to alpha
         auto const r = text_rendering_resource;
         glBindVertexArray(r.vao);
         glUseProgram(r.program.program);
-
         glBindBuffer(GL_ARRAY_BUFFER, r.vertex_buffer_object);
         float billboard[] = {
             left, top,     0.f, 1.f,
@@ -238,32 +230,22 @@ int main(int argc, char** const argv) {
             left, bottom,  0.f, 0.f,
             right, bottom, 1.f, 0.f
         };
-        glBufferData(GL_ARRAY_BUFFER, sizeof(billboard), &billboard, GL_STREAM_DRAW);
-        glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
-        glEnableVertexAttribArray(0);
-
-        glBindTexture(GL_TEXTURE_2D, r.texture);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, bitmap->width, bitmap->rows, 0, GL_RED, GL_UNSIGNED_BYTE, bitmap->buffer);
-        
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, r.texture);
-
-        glBindSampler(GL_TEXTURE0, r.sampler);
-
-        glEnable(GL_COLOR_LOGIC_OP);
-        glLogicOp(GL_COPY);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        // glUniform1i(r.sampler_uniform_location, 0);
-        // glUniform1f(r.top_uniform_location,    top);
-        // glUniform1f(r.left_uniform_location,   left);
-        // glUniform1f(r.bottom_uniform_location, bottom);
-        // glUniform1f(r.right_uniform_location,  right);
-        // glUniform3f(r.color_uniform_location,  1.f, 1.f, 1.f);
+        debug_invoke(glBufferData, GL_ARRAY_BUFFER, sizeof(billboard), &billboard, GL_STREAM_DRAW);
+        debug_invoke(glVertexAttribPointer, 0, 4, GL_FLOAT, GL_FALSE, 0, 0);
+        debug_invoke(glEnableVertexAttribArray, 0);
+        debug_invoke(glBindTexture, GL_TEXTURE_2D, r.texture);       // GL_TEXTURE_2D is a texture slot the GL provides for texture manipulation
+        debug_invoke(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);    // here, the properties of said texture are configured
+        debug_invoke(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        debug_invoke(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        debug_invoke(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        debug_invoke(glTexImage2D, GL_TEXTURE_2D, 0, GL_RED, bitmap->width, bitmap->rows, 0, GL_RED, GL_UNSIGNED_BYTE, bitmap->buffer);  // the texture is uploaded
+        debug_invoke(glActiveTexture, GL_TEXTURE0);                  // selects the active texture UNIT, not texture itself
+        debug_invoke(glBindTexture, GL_TEXTURE_2D, r.texture);       // a texture is bound to the texture UNIT
+        // debug_invoke(glBindSampler, 0, r.sampler);                // a sampler id is bound to the sampler. A sampler is a mechanism that fetches the underlaying data and transforms is in some specified way
+        debug_invoke(glDisable, GL_COLOR_LOGIC_OP);
+        // debug_invoke(glLogicOp, GL_COPY);
+        debug_invoke(glBlendFunc, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glUniform1i(r.sampler_uniform_location, 0);
         glEnable(GL_BLEND);
         glDrawArrays(GL_TRIANGLES, 0, 6);
         glBindVertexArray(0);
@@ -272,7 +254,6 @@ int main(int argc, char** const argv) {
     while (!glfwWindowShouldClose(window)) {
         bool should_redraw = false;
         glfwPollEvents();
-        print_gl_errors("glfwPollEvents");
         // bool const left_mouse_is_pressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
         // if (left_mouse_is_pressed && (!left_mouse_was_pressed)) {
         //     should_redraw |= true;

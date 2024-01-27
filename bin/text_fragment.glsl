@@ -12,5 +12,5 @@ bool isnan( float val )
 
 void main() {
     vec4 alpha = texture(text_bitmap, text_coords);
-    out_color = vec4(text_coords, 1.f, 1.f) * alpha;
+    out_color = vec4(text_coords, 1.f, alpha.x);
 }

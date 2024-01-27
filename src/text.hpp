@@ -44,7 +44,7 @@ void render_char(
         auto const device_left = screen_left * size_of_pixel;
         auto const device_top = screen_top * size_of_pixel;
         auto const device_right = device_left + width;
-        auto const device_bottom = device_top - height;
+        auto const device_bottom = device_top + height;
         draw_bitmap(&slot->bitmap,
                     device_left,
                     device_top,

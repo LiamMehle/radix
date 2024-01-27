@@ -58,11 +58,11 @@ struct TextRenderResource {
     GLuint texture;
     GLuint vertex_buffer_object;
     GLuint sampler;
-    GLint top_uniform_location;
-    GLint left_uniform_location;
-    GLint bottom_uniform_location;
-    GLint right_uniform_location;
-    GLint color_uniform_location;
+    // GLint top_uniform_location;
+    // GLint left_uniform_location;
+    // GLint bottom_uniform_location;
+    // GLint right_uniform_location;
+    // GLint color_uniform_location;
     GLint sampler_uniform_location;
 };
 
@@ -186,6 +186,8 @@ int main(int argc, char** const argv) {
     // enable vsync if present:
     // set_vsync(true);
 
+    print_gl_errors("early3");
+
     using namespace std::chrono_literals;
     auto constexpr target_frametime = (1000000us)/global_base_rate;
     auto t0 = std::chrono::steady_clock::now();
@@ -201,6 +203,7 @@ int main(int argc, char** const argv) {
     // set up text rendering resource
     GLuint sampler;
     glGenSamplers(1, &sampler);
+    print_gl_errors("gen sampler");
 
     TextRenderResource text_rendering_resource = {
         .program = text_program,
@@ -208,16 +211,14 @@ int main(int argc, char** const argv) {
         .texture = 0,
         .vertex_buffer_object = 0,
         .sampler = sampler,
-        .top_uniform_location    = glGetUniformLocation(text_program.program, "top"),
-        .left_uniform_location   = glGetUniformLocation(text_program.program, "left"),
-        .bottom_uniform_location = glGetUniformLocation(text_program.program, "bottom"),
-        .right_uniform_location  = glGetUniformLocation(text_program.program, "right"),
-        .color_uniform_location  = glGetUniformLocation(text_program.program, "color"),
-        .sampler_uniform_location = glGetUniformLocation(text_program.program, "text_bitmap"),
     };
     glGenVertexArrays(1, &text_rendering_resource.vao);
+    print_gl_errors("gen vao");
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glGenTextures(1, &text_rendering_resource.texture);
+    print_gl_errors("gen texture");
     glGenBuffers(1, &text_rendering_resource.vertex_buffer_object);
+    print_gl_errors("gen buffer");
     // done setting up text rendering resource
 
     auto const render_character_bitmap = [text_rendering_resource](FT_Bitmap const* const bitmap, auto const left, auto const top, auto const right, auto const bottom) {
@@ -225,64 +226,53 @@ int main(int argc, char** const argv) {
         // - linear blending
         // - bitmap is applied to alpha
         auto const r = text_rendering_resource;
-        print_gl_errors("early");
         glBindVertexArray(r.vao);
-        print_gl_errors("bind vao");
         glUseProgram(r.program.program);
-        print_gl_errors("program");
 
         glBindBuffer(GL_ARRAY_BUFFER, r.vertex_buffer_object);
-        print_gl_errors("bind buffer");
         float billboard[] = {
-            left, top,
-            left, bottom,
-            right, top,
-            right, top,
-            left, bottom,
-            right, bottom
+            left, top,     0.f, 1.f,
+            left, bottom,  0.f, 0.f,
+            right, top,    1.f, 1.f,
+            right, top,    1.f, 1.f,
+            left, bottom,  0.f, 0.f,
+            right, bottom, 1.f, 0.f
         };
         glBufferData(GL_ARRAY_BUFFER, sizeof(billboard), &billboard, GL_STREAM_DRAW);
-        print_gl_errors("buffer data");
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
-        print_gl_errors("vertex attrib pointer");
+        glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
         glEnableVertexAttribArray(0);
-        print_gl_errors("enable attrib");
 
-        glActiveTexture(GL_TEXTURE0);
-        print_gl_errors("active texture unit");
         glBindTexture(GL_TEXTURE_2D, r.texture);
-        print_gl_errors("bind texture unit");
-        glBindSampler(0, r.sampler);
-        print_gl_errors("bind sampler");
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, bitmap->width, bitmap->rows, 0, GL_RED, GL_UNSIGNED_BYTE, bitmap->buffer);
-        print_gl_errors("load bitmap");
+        
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, r.texture);
+
+        glBindSampler(GL_TEXTURE0, r.sampler);
+
         glEnable(GL_COLOR_LOGIC_OP);
         glLogicOp(GL_COPY);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        print_gl_errors("blend func");
 
-        glUniform1i(r.sampler, 0);
-        print_gl_errors("uniform sampler");
-        glUniform1f(r.top_uniform_location,    top);
-        print_gl_errors("uniform1");
-        glUniform1f(r.left_uniform_location,   left);
-        print_gl_errors("uniform2");
-        glUniform1f(r.bottom_uniform_location, bottom);
-        print_gl_errors("uniform3");
-        glUniform1f(r.right_uniform_location,  right);
-        print_gl_errors("uniform4");
-        glUniform3f(r.color_uniform_location,  1.f, 1.f, 1.f);
-        print_gl_errors("uniform5");
+        // glUniform1i(r.sampler_uniform_location, 0);
+        // glUniform1f(r.top_uniform_location,    top);
+        // glUniform1f(r.left_uniform_location,   left);
+        // glUniform1f(r.bottom_uniform_location, bottom);
+        // glUniform1f(r.right_uniform_location,  right);
+        // glUniform3f(r.color_uniform_location,  1.f, 1.f, 1.f);
         glEnable(GL_BLEND);
-        print_gl_errors("enable blend");
         glDrawArrays(GL_TRIANGLES, 0, 6);
-        print_gl_errors("draw");
         glBindVertexArray(0);
     };
 
     while (!glfwWindowShouldClose(window)) {
         bool should_redraw = false;
         glfwPollEvents();
+        print_gl_errors("glfwPollEvents");
         // bool const left_mouse_is_pressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
         // if (left_mouse_is_pressed && (!left_mouse_was_pressed)) {
         //     should_redraw |= true;
@@ -320,35 +310,35 @@ int main(int argc, char** const argv) {
         // left_mouse_was_pressed = left_mouse_is_pressed;
 
         // GL buffer id of buffer with data being streamed in, in a background context
-        uint_fast8_t const current_inactive_buffer_id = current_active_buffer_id ? 0 : 1;
-        auto const current_active_buffer = [&]() -> GLBufferObject& { return vbos[current_active_buffer_id]; };
+        // uint_fast8_t const current_inactive_buffer_id = current_active_buffer_id ? 0 : 1;
+        // auto const current_active_buffer = [&]() -> GLBufferObject& { return vbos[current_active_buffer_id]; };
 
-        GLBufferObject* null = nullptr;
-        auto const buffer_swap_success = shared_render_data.inactive_buffer.compare_exchange_weak(
-            null, &current_active_buffer(),
-            std::memory_order_acq_rel,
-            std::memory_order_consume);
+        // GLBufferObject* null = nullptr;
+        // auto const buffer_swap_success = shared_render_data.inactive_buffer.compare_exchange_weak(
+        //     null, &current_active_buffer(),
+        //     std::memory_order_acq_rel,
+        //     std::memory_order_consume);
 
-        if (buffer_swap_success) {
-            should_redraw |= true;
-            current_active_buffer_id = current_inactive_buffer_id;
+        // if (buffer_swap_success) {
+        //     should_redraw |= true;
+        //     current_active_buffer_id = current_inactive_buffer_id;
 
-            // ----------- drawing -----------
+        //     // ----------- drawing -----------
 
-            glBindVertexArray(point_cloud_vao);
-            configure_features();
-            glUseProgram(point_cloud_program.program);
-            glBindBuffer(GL_VERTEX_ARRAY, current_active_buffer().vbo);
-            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);  // configure point_cloud_vbo metadata
-            glEnableVertexAttribArray(0);                           // enable the config
-            DrawCallInfo draw_info {
-                .draw_mode = GL_TRIANGLES,
-                .vao = point_cloud_vao,
-                .vertex_offset = 0,
-                .vertex_count = static_cast<GLuint>(current_active_buffer().vertex_count),
-            };
-            glBindVertexArray(0);
-        }
+        //     glBindVertexArray(point_cloud_vao);
+        //     configure_features();
+        //     glUseProgram(point_cloud_program.program);
+        //     glBindBuffer(GL_VERTEX_ARRAY, current_active_buffer().vbo);
+        //     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);  // configure point_cloud_vbo metadata
+        //     glEnableVertexAttribArray(0);                           // enable the config
+        //     DrawCallInfo draw_info {
+        //         .draw_mode = GL_TRIANGLES,
+        //         .vao = point_cloud_vao,
+        //         .vertex_offset = 0,
+        //         .vertex_count = static_cast<GLuint>(current_active_buffer().vertex_count),
+        //     };
+        //     glBindVertexArray(0);
+        // }
 
         // temp rendering code
         glClearColor(.1f, .1f, .1f, 5.f);
@@ -362,7 +352,7 @@ int main(int argc, char** const argv) {
             2,
             0,
             0,
-            1.f/1024.f,
+            1.f/128.f,
             render_character_bitmap
         );
 

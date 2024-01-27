@@ -11,7 +11,7 @@ struct FullProgram {
     GLint fragment_shader;
 };
 
-#ifdef DEBUG_OUTPUT
+#ifndef DEBUG_OUTPUT
 #include <cstdio>
 static inline
 GLenum print_gl_errors(char const* const where) {

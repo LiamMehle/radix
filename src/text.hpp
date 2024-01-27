@@ -27,7 +27,7 @@ void render_char(
         glyph_index = FT_Get_Char_Index(face, text[n]);
 
         /* load glyph image into the slot (erase previous one) */
-        error = FT_Load_Glyph(face, glyph_index, FT_LOAD_DEFAULT);
+        error = FT_Load_Glyph(face, glyph_index, FT_LOAD_RENDER);
         if ( error )
             continue;  /* ignore errors */
 

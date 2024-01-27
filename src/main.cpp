@@ -55,14 +55,7 @@ struct SizedVbo {
 struct TextRenderResource {
     FullProgram program;
     GLuint vao;
-    GLuint texture;
     GLuint vertex_buffer_object;
-    GLuint sampler;
-    // GLint top_uniform_location;
-    // GLint left_uniform_location;
-    // GLint bottom_uniform_location;
-    // GLint right_uniform_location;
-    // GLint color_uniform_location;
     GLint sampler_uniform_location;
 };
 
@@ -203,13 +196,11 @@ int main(int argc, char** const argv) {
     TextRenderResource text_rendering_resource = {
         .program = text_program,
         .vao = 0,
-        .texture = 0,
         .vertex_buffer_object = 0,
         .sampler_uniform_location = glGetUniformLocation(text_program.program, "text_bitmap"),
     };
     glGenVertexArrays(1, &text_rendering_resource.vao);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glGenTextures(1, &text_rendering_resource.texture);
     glGenBuffers(1, &text_rendering_resource.vertex_buffer_object);
     // done setting up text rendering resource
 
@@ -233,15 +224,9 @@ int main(int argc, char** const argv) {
         debug_invoke(glBufferData, GL_ARRAY_BUFFER, sizeof(billboard), &billboard, GL_STREAM_DRAW);
         debug_invoke(glVertexAttribPointer, 0, 4, GL_FLOAT, GL_FALSE, 0, 0);
         debug_invoke(glEnableVertexAttribArray, 0);
-        debug_invoke(glBindTexture, GL_TEXTURE_2D, r.texture);       // GL_TEXTURE_2D is a texture slot the GL provides for texture manipulation
-        debug_invoke(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);    // here, the properties of said texture are configured
-        debug_invoke(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        debug_invoke(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        debug_invoke(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        debug_invoke(glTexImage2D, GL_TEXTURE_2D, 0, GL_RED, bitmap.width, bitmap.height, 0, GL_RED, GL_UNSIGNED_BYTE, bitmap.data.data());  // the texture is uploaded
-        debug_invoke(glActiveTexture, GL_TEXTURE0);                  // selects the active texture UNIT, not texture itself
-        debug_invoke(glBindTexture, GL_TEXTURE_2D, r.texture);       // a texture is bound to the texture UNIT
-        // debug_invoke(glBindSampler, 0, r.sampler);                // a sampler id is bound to the sampler. A sampler is a mechanism that fetches the underlaying data and transforms is in some specified way
+        debug_invoke(glActiveTexture, GL_TEXTURE0);  // selects the active texture UNIT, not texture itself
+        glBindTexture(GL_TEXTURE_2D, bitmap.texture);  // a texture is bound to the texture UNIT
+        // debug_invoke(glBindSampler, 0, r.sampler);  // a sampler id is bound to the sampler. A sampler is a mechanism that fetches the underlaying data and transforms is in some specified way
         debug_invoke(glDisable, GL_COLOR_LOGIC_OP);
         // debug_invoke(glLogicOp, GL_COPY);
         debug_invoke(glBlendFunc, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -328,11 +313,12 @@ int main(int argc, char** const argv) {
         glClear(GL_COLOR_BUFFER_BIT);
 
         // test drawing text
-        char text[] = "hi";
+        char constexpr text[] = "hello";
         auto left = 0.f;
         auto top = 0.f;
-        auto pixel_size = 0.01f;
-        for (auto const& c : text) {
+        auto constexpr pixel_size = 0.01f;
+        for (int i=0; i<sizeof(text)-1; i++) {
+            auto const c = text[i];
             auto const optional_bitmap = charset.bitmap[c];
             if (optional_bitmap.has_value()) {
                 auto const bitmap = optional_bitmap.value();

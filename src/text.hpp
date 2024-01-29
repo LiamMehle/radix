@@ -5,10 +5,10 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
-struct Bitmap {                 // size 32, align 8
-    GLuint   texture;  // size 24, align 8
-    uint32_t width;             // size 4,  align 2
-    uint32_t height;            // size 4,  align 2
+struct Bitmap {
+    GLuint   texture;           // size 4,  align 4
+    uint32_t width;             // size 4,  align 4
+    uint32_t height;            // size 4,  align 4
 };
 std::optional<Bitmap> get_bitmap(FT_Face const face, char const c) {
     auto const glyph_index = FT_Get_Char_Index(face, c);

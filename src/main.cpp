@@ -6,8 +6,8 @@
 #include <cstring>
 #include <string>
 #include <vector>
-    #include <thread>
-    #include <filesystem>
+#include <thread>
+#include <filesystem>
 #include <unistd.h>
 #include <ros/ros.h>
 #include <sensor_msgs/PointCloud2.h>
@@ -44,9 +44,7 @@ struct DrawCallInfo {
     GLuint vertex_count;
 };
 struct PrivateRenderData {
-    uint32_t flags;
-    DrawCallInfo point_cloud_draw_info;
-    DrawCallInfo perimeter_draw_info;
+    std::vector<std::optional<DrawCallInfo>> drawables;
 };
 struct SizedVbo {
     GLuint vbo;
@@ -75,14 +73,12 @@ static
 void draw_window(GLFWwindow* window) {
     glfwMakeContextCurrent(window);
     // clear screen
-    // glClearColor(.1f, .1f, .1f, 5.f);
-    // glClear(GL_COLOR_BUFFER_BIT);
+    glClearColor(.1f, .1f, .1f, 5.f);
+    glClear(GL_COLOR_BUFFER_BIT);
 
-    draw_entity(private_render_data.point_cloud_draw_info);
-
-    // draw perimeter (if enabled)
-    if (private_render_data.flags & PrivateRenderDataFlagBits::perimeter_enabled)
-        draw_entity(private_render_data.perimeter_draw_info);
+    for (auto const& maybe_drawable : private_render_data.drawables)
+        if (maybe_drawable.has_value())
+            draw_entity(maybe_drawable.value());
 
     glfwSwapBuffers(window);
 }
@@ -98,19 +94,6 @@ GLuint convert_to_vbo(GLFWwindow* window, std::vector<T> const& verticies, GLenu
 
 
 int main(int argc, char** const argv) {
-    FT_Library library;
-    if (FT_Init_FreeType(&library)) {
-        std::puts("failed to initialize freetype");
-        return 1;
-    }
-    FT_Face face;
-    if (FT_New_Face(library, "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSans.ttf", 0, &face )) {
-        std::puts("failed to acquire faccia");
-        return 2;
-    }
-    FT_Set_Char_Size(face, 11*64, 11*64, 300,300);
-
-
     ros::init(argc, argv, "radix_node");
     // initialize OpenGL
     int status = 0;
@@ -120,8 +103,8 @@ int main(int argc, char** const argv) {
         std::puts("failed to initialize glfw");
         return 3;
     }
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
@@ -152,11 +135,11 @@ int main(int argc, char** const argv) {
         return 5;
     }
 
-    glViewport(0, 0, frame_buffer_width, frame_buffer_height);
+    // glViewport(0, 0, frame_buffer_width, frame_buffer_height);
 
     // configure the perimeter render data because it is handled asynchronously
     raii::VAO perimeter_vao;
-    private_render_data.perimeter_draw_info.vao = perimeter_vao;
+    // private_render_data.perimeter_draw_info.vao = perimeter_vao;
     raii::VBO perimeter_vbo;
 
     raii::VAO point_cloud_vao{};
@@ -189,7 +172,6 @@ int main(int argc, char** const argv) {
     uint_fast8_t current_active_buffer_id = 0;
     std::vector<struct CursorPosition> click_points{};
     glfwSetWindowRefreshCallback(window, draw_window);
-    // glfwSetMouseButtonCallback(window, handle_mouse_press);
     bool left_mouse_was_pressed = false;
 
     // set up text rendering resource
@@ -212,7 +194,7 @@ int main(int argc, char** const argv) {
         auto const r = text_rendering_resource;
         glBindVertexArray(r.vao);
         glUseProgram(r.program.program);
-        glBindBuffer(GL_ARRAY_BUFFER, r.vertex_buffer_object);
+        debug_invoke(glBindBuffer, GL_ARRAY_BUFFER, r.vertex_buffer_object);
         float billboard[] = {
             left, top,     0.f, 1.f,
             left, bottom,  0.f, 0.f,
@@ -236,7 +218,22 @@ int main(int argc, char** const argv) {
         glBindVertexArray(0);
     };
 
-    auto const charset = load_charset<0, 128>(face);
+    FT_Library library;
+    if (FT_Init_FreeType(&library)) {
+        std::puts("failed to initialize freetype");
+        return 1;
+    }
+    FT_Face face;
+    if (FT_New_Face(library, "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSans.ttf", 0, &face )) {
+        std::puts("failed to acquire faccia");
+        return 2;
+    }
+    FT_Set_Char_Size(face,0,72 * 64 + 32, 300, 300);
+    auto const big_charset = load_charset<0, 128>(face);
+    FT_Set_Char_Size(face,0,12 * 64 + 32, 300, 300);
+    auto const small_charset = load_charset<0, 128>(face);
+    FT_Done_Face(face);
+    FT_Done_FreeType(library);
 
     while (!glfwWindowShouldClose(window)) {
         bool should_redraw = false;
@@ -316,10 +313,12 @@ int main(int argc, char** const argv) {
         char constexpr text[] = "hello";
         auto left = 0.f;
         auto top = 0.f;
-        auto constexpr pixel_size = 0.01f;
+        int window_width, window_height;
+        glfwGetWindowSize(window, &window_width, &window_height);
+        auto const pixel_size = 2.f/window_height;
         for (int i=0; i<sizeof(text)-1; i++) {
             auto const c = text[i];
-            auto const optional_bitmap = charset.bitmap[c];
+            auto const optional_bitmap = big_charset.bitmap[c];
             if (optional_bitmap.has_value()) {
                 auto const bitmap = optional_bitmap.value();
                 auto const width = bitmap.width * pixel_size;

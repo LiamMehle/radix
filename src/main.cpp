@@ -102,7 +102,6 @@ int main(int argc, char** const argv) {
     GLuint point_cloud_vao, perimeter_vao, perimeter_vbo;
     glGenVertexArrays(1, &perimeter_vao);
     glGenBuffers(1, &perimeter_vbo);
-    // private_render_data.perimeter_draw_info.vao = perimeter_vao;
 
     glGenVertexArrays(1, &point_cloud_vao);
     std::array<GLBufferObject, 2> vbos;
@@ -140,7 +139,6 @@ int main(int argc, char** const argv) {
         .current_active_buffer_id = 0,
     };
     glfwSetWindowRefreshCallback(window, draw_window);
-    // glfwSetMouseButtonCallback(window, handle_mouse_press);
     while (!glfwWindowShouldClose(window))
         render_state = refresh_render_state(std::move(render_state));
 
@@ -235,13 +233,13 @@ PersistantRenderState refresh_render_state(PersistantRenderState state) {
     auto const frametime = std::chrono::duration_cast<std::chrono::microseconds>(t2-state.t0);
     state.sleep_duration_adjustment = state.target_frametime-frametime;
 #ifdef DEBUG_FPS
-    // printf("vbo handle: %d\n", current_active_buffer().vbo);
-    // printf("tri_count:  %zu\n", triangle_count);
-    // printf("logic_time: %li us\n", logic_time.count());
-    // printf("frame_time: %li us\n", frametime.count());
-    // printf("adjustment: %li us\n", sleep_duration_adjustment.count());
-    // printf("fps:        %li\n", 1000000/frametime.count());
-    // printf("---------------------\n");
+    printf("vbo handle: %d\n", current_active_buffer().vbo);
+    printf("tri_count:  %zu\n", triangle_count);
+    printf("logic_time: %li us\n", logic_time.count());
+    printf("frame_time: %li us\n", frametime.count());
+    printf("adjustment: %li us\n", sleep_duration_adjustment.count());
+    printf("fps:        %li\n", 1000000/frametime.count());
+    printf("---------------------\n");
 #endif
     state.t0 = t2;
     return state;

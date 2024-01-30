@@ -40,9 +40,7 @@ void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
             return;
 
         glfwMakeContextCurrent(offscreen_window);
-        print_gl_errors("early");
         glBindBuffer(GL_COPY_WRITE_BUFFER, transient_buffer->vbo);
-        print_gl_errors("bind buffer");
         // 3 floats/point
         // 3 points/triangle
         // 2 triangles/input point except for top row and left column
@@ -56,9 +54,7 @@ void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
 
         float* __restrict buffer = static_cast<float*>(glMapBuffer(GL_COPY_WRITE_BUFFER, GL_WRITE_ONLY));
         
-        print_gl_errors("buffer storage");
         
-        print_gl_errors("map buffer");
         for (size_t i=0; i<height-1; i++) {
             for (size_t j=0; j<width-1; j++) {
                 auto const top_left  = point_array[i    *width+j  ];

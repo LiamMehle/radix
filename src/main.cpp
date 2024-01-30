@@ -21,6 +21,9 @@
 #include "types.hpp"
 
 static
+PersistantRenderState refresh_render_state(PersistantRenderState state);
+
+static
 void error_callback(int, const char* err_str) {
     printf("GLFW Error: %s\n", err_str);
 }
@@ -30,7 +33,7 @@ std::string binary_path = fs::canonical("/proc/self/exe").parent_path();
 
 static
 PrivateRenderData private_render_data;
-ExposedRenderData shared_render_data;  // state of the GL thread exposed to other threads
+ExposedRenderData shared_render_data = { 0 };  // state of the GL thread exposed to other threads
 
 static
 void draw_entity(DrawCallInfo const draw_info) {
@@ -120,113 +123,126 @@ int main(int argc, char** const argv) {
 
     using namespace std::chrono_literals;
     auto constexpr target_frametime = (1000000us)/global_base_rate;
-    auto t0 = std::chrono::steady_clock::now();
-    auto sleep_duration_adjustment = 0us;
-    bool data_is_loaded = false;
     configure_features();
-    size_t triangle_count = 0;
-    uint_fast8_t current_active_buffer_id = 0;
-    std::vector<struct CursorPosition> click_points{};
+    PersistantRenderState render_state {
+        .sleep_duration_adjustment = 0us,
+        .target_frametime = target_frametime,
+        .perimeter_vao = perimeter_vao,
+        .perimeter_vbo = perimeter_vbo,
+        .point_cloud_vao = point_cloud_vao,
+        .point_cloud_program = point_cloud_program,
+        .perimeter_program = perimeter_program,
+        .window = window,
+        .click_points = {},
+        .left_mouse_was_pressed = false,
+        .vbos = std::move(vbos),
+        .t0 = std::chrono::steady_clock::now(),
+        .current_active_buffer_id = 0,
+    };
     glfwSetWindowRefreshCallback(window, draw_window);
     // glfwSetMouseButtonCallback(window, handle_mouse_press);
-    bool left_mouse_was_pressed = false;
-    while (!glfwWindowShouldClose(window)) {
-        bool should_redraw = false;
-        glfwPollEvents();
-        bool const left_mouse_is_pressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
-        if (left_mouse_is_pressed && (!left_mouse_was_pressed)) {
-            should_redraw |= true;
-            // update perimeter display
-            // todo: wait for last transfer to finish before updating
-            // clickpoints due to iterator invalidation
-
-            // setup draw info
-            auto cursor_pos = get_cursor_pos(window);
-            click_points.push_back(cursor_pos);
-            auto& draw_info = private_render_data.perimeter_draw_info;
-            draw_info.vao = perimeter_vao;
-            glBindVertexArray(draw_info.vao);
-            glUseProgram(perimeter_program.program);
-            glBindBuffer(GL_ARRAY_BUFFER, perimeter_vbo);
-            GLuint const vertex_count = click_points.size();
-            GLuint const required_buffer_size = sizeof(click_points[0]) * vertex_count;
-            glBufferData(GL_ARRAY_BUFFER, required_buffer_size, click_points.data(), GL_STATIC_DRAW);
-
-            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
-            glEnableVertexAttribArray(0);
-
-            auto const vertex_count_for_drawing = vertex_count;
-            draw_info = {
-                .draw_mode = GL_LINE_LOOP,
-                .vao = draw_info.vao,
-                .vertex_offset = 0,
-                .vertex_count = vertex_count_for_drawing,
-            };
-            private_render_data.flags = (vertex_count_for_drawing != 0) * PrivateRenderDataFlagBits::perimeter_enabled
-                                      | (private_render_data.flags     & ~PrivateRenderDataFlagBits::perimeter_enabled);
-            glBindVertexArray(0);
-        }
-        left_mouse_was_pressed = left_mouse_is_pressed;
-
-        // GL buffer id of buffer with data being streamed in, in a background context
-        uint_fast8_t const current_inactive_buffer_id = current_active_buffer_id ? 0 : 1;
-        auto const current_active_buffer = [&]() -> GLBufferObject& { return vbos[current_active_buffer_id]; };
-
-        GLBufferObject* null = nullptr;
-        auto const buffer_swap_success = shared_render_data.inactive_buffer.compare_exchange_weak(
-            null, &current_active_buffer(),
-            std::memory_order_acq_rel,
-            std::memory_order_consume);
-
-        if (buffer_swap_success) {
-            should_redraw |= true;
-            current_active_buffer_id = current_inactive_buffer_id;
-
-            // ----------- drawing -----------
-
-            glBindVertexArray(point_cloud_vao);
-            glUseProgram(point_cloud_program.program);
-            glBindBuffer(GL_VERTEX_ARRAY, current_active_buffer().vbo);
-            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);  // configure point_cloud_vbo metadata
-            glEnableVertexAttribArray(0);                           // enable the config
-            DrawCallInfo draw_info {
-                .draw_mode = GL_TRIANGLES,
-                .vao = point_cloud_vao,
-                .vertex_offset = 0,
-                .vertex_count = static_cast<GLuint>(current_active_buffer().vertex_count),
-            };
-            glBindVertexArray(0);
-        }
-
-        if (should_redraw)
-            draw_window(window);
-
-        // logic time end
-        auto const t1 = std::chrono::steady_clock::now();
-        auto const logic_time = std::chrono::duration_cast<std::chrono::microseconds>(t1-t0);
-        // adjustment is divided by 2 as a heuristic (avoid large +/- swings, effectively P from PID with factor of .5)
-        auto const time_to_sleep_for = target_frametime - logic_time + (sleep_duration_adjustment/2);
-        // max prevents underflow
-        usleep(max(static_cast<int64_t>(0), std::chrono::duration_cast<std::chrono::microseconds>(time_to_sleep_for).count()));
-        // end of frame time (printing is not included, *though it should be*)
-        auto const t2 = std::chrono::steady_clock::now();
-        auto const frametime = std::chrono::duration_cast<std::chrono::microseconds>(t2-t0);
-        sleep_duration_adjustment = target_frametime-frametime;
-#ifdef DEBUG_FPS
-        // printf("vbo handle: %d\n", current_active_buffer().vbo);
-        // printf("tri_count:  %zu\n", triangle_count);
-        // printf("logic_time: %li us\n", logic_time.count());
-        // printf("frame_time: %li us\n", frametime.count());
-        // printf("adjustment: %li us\n", sleep_duration_adjustment.count());
-        // printf("fps:        %li\n", 1000000/frametime.count());
-        // printf("---------------------\n");
-#endif
-        t0 = t2;
-    }
+    while (!glfwWindowShouldClose(window))
+        render_state = refresh_render_state(std::move(render_state));
 
     for (auto& vbo : vbos)
         glDeleteBuffers(1, &vbo.vbo);
 
     glfwTerminate();
     return 0;
+}
+
+static
+PersistantRenderState refresh_render_state(PersistantRenderState state) {
+    bool should_redraw = false;
+    glfwPollEvents();
+    bool const left_mouse_is_pressed = glfwGetMouseButton(state.window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    if (left_mouse_is_pressed && (!state.left_mouse_was_pressed)) {
+        should_redraw |= true;
+        // update perimeter display
+        // todo: wait for last transfer to finish before updating
+        // clickpoints due to iterator invalidation
+
+        // setup draw info
+        auto cursor_pos = get_cursor_pos(state.window);
+        state.click_points.push_back(cursor_pos);
+        auto& draw_info = private_render_data.perimeter_draw_info;
+        draw_info.vao = state.perimeter_vao;
+        glBindVertexArray(draw_info.vao);
+        glUseProgram(state.perimeter_program.program);
+        glBindBuffer(GL_ARRAY_BUFFER, state.perimeter_vbo);
+        GLuint const vertex_count = state.click_points.size();
+        GLuint const required_buffer_size = sizeof(state.click_points[0]) * vertex_count;
+        glBufferData(GL_ARRAY_BUFFER, required_buffer_size, state.click_points.data(), GL_STATIC_DRAW);
+
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        glEnableVertexAttribArray(0);
+
+        auto const vertex_count_for_drawing = vertex_count;
+        draw_info = {
+            .draw_mode = GL_LINE_LOOP,
+            .vao = draw_info.vao,
+            .vertex_offset = 0,
+            .vertex_count = vertex_count_for_drawing,
+        };
+        private_render_data.flags = (vertex_count_for_drawing != 0) * PrivateRenderDataFlagBits::perimeter_enabled
+                                    | (private_render_data.flags     & ~PrivateRenderDataFlagBits::perimeter_enabled);
+        glBindVertexArray(0);
+    }
+    state.left_mouse_was_pressed = left_mouse_is_pressed;
+
+    // GL buffer id of buffer with data being streamed in, in a background context
+    uint_fast8_t const current_inactive_buffer_id = state.current_active_buffer_id ? 0 : 1;
+    auto const current_active_buffer = [&]() -> GLBufferObject& { return state.vbos[state.current_active_buffer_id]; };
+
+    GLBufferObject* null = nullptr;
+    auto const buffer_swap_success = shared_render_data.inactive_buffer.compare_exchange_weak(
+        null, &current_active_buffer(),
+        std::memory_order_acq_rel,
+        std::memory_order_consume);
+
+    if (buffer_swap_success) {
+        should_redraw |= true;
+        state.current_active_buffer_id = current_inactive_buffer_id;
+
+        // ----------- drawing -----------
+
+        glBindVertexArray(state.point_cloud_vao);
+        glUseProgram(state.point_cloud_program.program);
+        glBindBuffer(GL_ARRAY_BUFFER, current_active_buffer().vbo);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);  // configure point_cloud_vbo metadata
+        glEnableVertexAttribArray(0);                           // enable the config
+        private_render_data.point_cloud_draw_info = {
+            .draw_mode = GL_TRIANGLES,
+            .vao = state.point_cloud_vao,
+            .vertex_offset = 0,
+            .vertex_count = static_cast<GLuint>(current_active_buffer().vertex_count),
+        };
+        glBindVertexArray(0);
+    }
+
+    if (should_redraw)
+        draw_window(state.window);
+
+    // logic time end
+    auto const t1 = std::chrono::steady_clock::now();
+    auto const logic_time = std::chrono::duration_cast<std::chrono::microseconds>(t1-state.t0);
+    // adjustment is divided by 2 as a heuristic (avoid large +/- swings, effectively P from PID with factor of .5)
+    auto const time_to_sleep_for = state.target_frametime - logic_time + (state.sleep_duration_adjustment/2);
+    // max prevents underflow
+    usleep(max(static_cast<int64_t>(0), std::chrono::duration_cast<std::chrono::microseconds>(time_to_sleep_for).count()));
+    // end of frame time (printing is not included, *though it should be*)
+    auto const t2 = std::chrono::steady_clock::now();
+    auto const frametime = std::chrono::duration_cast<std::chrono::microseconds>(t2-state.t0);
+    state.sleep_duration_adjustment = state.target_frametime-frametime;
+#ifdef DEBUG_FPS
+    // printf("vbo handle: %d\n", current_active_buffer().vbo);
+    // printf("tri_count:  %zu\n", triangle_count);
+    // printf("logic_time: %li us\n", logic_time.count());
+    // printf("frame_time: %li us\n", frametime.count());
+    // printf("adjustment: %li us\n", sleep_duration_adjustment.count());
+    // printf("fps:        %li\n", 1000000/frametime.count());
+    // printf("---------------------\n");
+#endif
+    state.t0 = t2;
+    return state;
 }

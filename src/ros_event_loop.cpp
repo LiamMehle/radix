@@ -5,6 +5,7 @@
 #include "global_config.hpp"
 #include "gl_tools.hpp"
 #include <chrono>
+#include <GLFW/glfw3.h>
 
 
 #pragma pack(1)
@@ -102,7 +103,7 @@ void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
     shared_render_data.inactive_buffer.store(nullptr, std::memory_order_release);
 }
 
-void ros_event_loop(int argc, char** const argv, GLFWwindow const* const window) {
+void ros_event_loop(int argc, char** const argv, GLFWwindow* window) {
     ros::NodeHandle n;
     
     auto transport_hints = ros::TransportHints();

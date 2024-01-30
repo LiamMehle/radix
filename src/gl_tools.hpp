@@ -3,7 +3,6 @@
 #include <fstream>
 #include "gl.h"
 #include "utils.hpp"
-#include "raii.cpp"
 
 struct FullProgram {
     GLint program;
@@ -122,7 +121,7 @@ static inline
 GLint create_program(char const* const vertex_shader_path, char const* const fragment_shader_path) {
     // shaders:
     
-    raii::Program program{};
+    GLuint program = glCreateProgram();
     GLint vertex_shader   = shader_from_file(vertex_shader_path,   GL_VERTEX_SHADER);
     GLint fragment_shader = shader_from_file(fragment_shader_path, GL_FRAGMENT_SHADER);
     if (!vertex_shader || !fragment_shader)

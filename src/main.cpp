@@ -14,7 +14,7 @@
 #include "gl.h"
 #include "gl_tools.hpp"
 #include "utils.hpp"
-#include "raii.cpp"
+// #include "raii.cpp"  // marked for removal
 #include "functional.hpp"
 #include "global_config.hpp"
 #include "ros_event_loop.hpp"
@@ -58,7 +58,7 @@ struct DrawCallInfo {
     GLuint vertex_offset;
     GLuint vertex_count;
     uint32_t uniform_count;
-    UniformConfig uniforms[UNIFORM_COUNT];\
+    UniformConfig uniforms[UNIFORM_COUNT];
     uint32_t texture_unit_count;
     TextureUnitConfig texture_units[TEXTURE_UNIT_COUNT];
 };
@@ -138,7 +138,7 @@ int main(int argc, char** const argv) {
     // initialize OpenGL
     int status = 0;
     glfwSetErrorCallback(error_callback);
-    raii::GLFW glfw{};
+    auto const glfw = glfwInit();
     if (glfw != GLFW_TRUE) {
         std::puts("failed to initialize glfw");
         return 3;
@@ -148,8 +148,8 @@ int main(int argc, char** const argv) {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
-    raii::Window window = raii::Window(WIDTH, HEIGHT, "Radix", nullptr, nullptr);
-    if (!static_cast<GLFWwindow*>(window)) {
+    auto const window = glfwCreateWindow(WIDTH, HEIGHT, "Radix", nullptr, nullptr);
+    if (!window) {
         std::puts("failed to create a window");
         return 4;
     }
@@ -178,11 +178,12 @@ int main(int argc, char** const argv) {
     // glViewport(0, 0, frame_buffer_width, frame_buffer_height);
 
     // configure the perimeter render data because it is handled asynchronously
-    raii::VAO perimeter_vao;
+    GLuint point_cloud_vao, perimeter_vao, perimeter_vbo;
+    glGenVertexArrays(1, &perimeter_vao);
+    glGenBuffers(1, &perimeter_vbo);
     // private_render_data.perimeter_draw_info.vao = perimeter_vao;
-    raii::VBO perimeter_vbo;
 
-    raii::VAO point_cloud_vao{};
+    glGenVertexArrays(1, &point_cloud_vao);
     std::array<GLBufferObject, 2> vbos;
     for (auto& vbo : vbos) {
         glGenBuffers(1, &vbo.vbo);
@@ -298,7 +299,7 @@ int main(int argc, char** const argv) {
     auto const small_charset = load_charset<0, 128>(face);
     FT_Done_Face(face);
     FT_Done_FreeType(library);
-
+    // std::vector<GLuint> 
     while (!glfwWindowShouldClose(window)) {
         bool should_redraw = false;
         glfwPollEvents();
@@ -436,5 +437,6 @@ int main(int argc, char** const argv) {
     for (auto& vbo : vbos)
         glDeleteBuffers(1, &vbo.vbo);
 
+    glfwTerminate();
     return 0;
 }

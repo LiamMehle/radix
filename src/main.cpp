@@ -21,6 +21,11 @@
 #include "text.hpp"
 
 static
+size_t constexpr UNIFORM_COUNT = 4;
+static
+size_t constexpr TEXTURE_UNIT_COUNT = 4;
+
+static
 void error_callback(int, const char* err_str) {
    std::printf("GLFW Error: %s\n", err_str);
 }
@@ -33,15 +38,29 @@ int x_error_handler(Display* display, XErrorEvent* event) {
     return 0;
 }
 
-// data used for rendering of a frame
-enum PrivateRenderDataFlagBits {
-    perimeter_enabled = 1,
+struct UniformConfig {
+    enum UniformType {
+        Integer1
+    };
+    union Value {
+        GLint integer;
+    };
+    UniformType type;
+    GLint location;
+    Value value;
+};
+struct TextureUnitConfig {
+    GLuint assigned_texture;
 };
 struct DrawCallInfo {
-    GLenum draw_mode;
     GLuint vao;
+    GLenum draw_mode;
     GLuint vertex_offset;
     GLuint vertex_count;
+    uint32_t uniform_count;
+    UniformConfig uniforms[UNIFORM_COUNT];\
+    uint32_t texture_unit_count;
+    TextureUnitConfig texture_units[TEXTURE_UNIT_COUNT];
 };
 struct PrivateRenderData {
     std::vector<std::optional<DrawCallInfo>> drawables;
@@ -63,7 +82,26 @@ ExposedRenderData shared_render_data;  // state of the GL thread exposed to othe
 
 static
 void draw_entity(DrawCallInfo const draw_info) {
+    // bind Vertex data
     glBindVertexArray(draw_info.vao);
+
+    // configure uniforms
+    // for (int i=0; i<draw_info.uniform_count; i++) {
+    //     switch (draw_info.uniforms[i].type) {
+    //         case UniformConfig::UniformType::Integer1:
+    //             glUniform1i(draw_info.uniforms[i].location, draw_info.uniforms[i].value.integer);
+    //     }
+    // }
+
+    // configure textures
+    for (int i=0; i<draw_info.texture_unit_count; i++) {
+        glActiveTexture(GL_TEXTURE0 + i);  // selects the active texture UNIT, not texture itself
+        glBindTexture(GL_TEXTURE_2D, draw_info.texture_units[i].assigned_texture);
+    }
+
+    // draw
+    // glActiveTexture(GL_TEXTURE0);
+    // glBindTexture(GL_TEXTURE_2D, draw_info.texture_units[0].assigned_texture);
     glDrawArrays(draw_info.draw_mode, draw_info.vertex_offset, draw_info.vertex_count);
 }
 
@@ -177,24 +215,24 @@ int main(int argc, char** const argv) {
     // set up text rendering resource
     TextRenderResource text_rendering_resource = {
         .program = text_program,
-        .vao = 0,
         .vertex_buffer_object = 0,
         .sampler_uniform_location = glGetUniformLocation(text_program.program, "text_bitmap"),
     };
-    glGenVertexArrays(1, &text_rendering_resource.vao);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glGenBuffers(1, &text_rendering_resource.vertex_buffer_object);
     // done setting up text rendering resource
 
-    auto const render_character_bitmap = [text_rendering_resource](Bitmap const& bitmap, auto const left, auto const top, auto const right, auto const bottom) {
-        #define debug_invoke(x, ...) x(__VA_ARGS__); print_gl_errors(#x)
+    auto const render_character_bitmap = [text_rendering_resource](Bitmap const& bitmap, auto const left, auto const top, auto const right, auto const bottom) -> DrawCallInfo {
         // freetype suggestions:
         // - linear blending
         // - bitmap is applied to alpha
         auto const r = text_rendering_resource;
-        glBindVertexArray(r.vao);
+        GLuint vao;
+        glGenVertexArrays(1, &vao);
+        glBindVertexArray(vao);
+
         glUseProgram(r.program.program);
-        debug_invoke(glBindBuffer, GL_ARRAY_BUFFER, r.vertex_buffer_object);
+        glBindBuffer(GL_ARRAY_BUFFER, r.vertex_buffer_object);
         float billboard[] = {
             left, top,     0.f, 1.f,
             left, bottom,  0.f, 0.f,
@@ -203,19 +241,38 @@ int main(int argc, char** const argv) {
             left, bottom,  0.f, 0.f,
             right, bottom, 1.f, 0.f
         };
-        debug_invoke(glBufferData, GL_ARRAY_BUFFER, sizeof(billboard), &billboard, GL_STREAM_DRAW);
-        debug_invoke(glVertexAttribPointer, 0, 4, GL_FLOAT, GL_FALSE, 0, 0);
-        debug_invoke(glEnableVertexAttribArray, 0);
-        debug_invoke(glActiveTexture, GL_TEXTURE0);  // selects the active texture UNIT, not texture itself
-        glBindTexture(GL_TEXTURE_2D, bitmap.texture);  // a texture is bound to the texture UNIT
+        glBufferData(GL_ARRAY_BUFFER, sizeof(billboard), &billboard, GL_STREAM_DRAW);
+        glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
+        glEnableVertexAttribArray(0);
+
+        // glActiveTexture(GL_TEXTURE0);  // selects the active texture UNIT, not texture itself
+        // glBindTexture(GL_TEXTURE_2D, bitmap.texture);  // a texture is bound to the texture UNIT
         // debug_invoke(glBindSampler, 0, r.sampler);  // a sampler id is bound to the sampler. A sampler is a mechanism that fetches the underlaying data and transforms is in some specified way
-        debug_invoke(glDisable, GL_COLOR_LOGIC_OP);
-        // debug_invoke(glLogicOp, GL_COPY);
-        debug_invoke(glBlendFunc, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDisable(GL_COLOR_LOGIC_OP);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glUniform1i(r.sampler_uniform_location, 0);
         glEnable(GL_BLEND);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+
         glBindVertexArray(0);
+
+        return DrawCallInfo {
+            .vao = vao,
+            .draw_mode = GL_TRIANGLES,
+            .vertex_offset = 0,
+            .vertex_count = 6,
+            .uniform_count = 1,
+            .uniforms = UniformConfig {
+                .type = UniformConfig::UniformType::Integer1,
+                .location = r.sampler_uniform_location,
+                .value = {
+                    .integer = 0,
+                },
+            },
+            .texture_unit_count = 1,
+            .texture_units = {
+                bitmap.texture,
+            },
+        };
     };
 
     FT_Library library;
@@ -238,6 +295,9 @@ int main(int argc, char** const argv) {
     while (!glfwWindowShouldClose(window)) {
         bool should_redraw = false;
         glfwPollEvents();
+
+        private_render_data.drawables.clear();
+
         // bool const left_mouse_is_pressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
         // if (left_mouse_is_pressed && (!left_mouse_was_pressed)) {
         //     should_redraw |= true;
@@ -306,10 +366,11 @@ int main(int argc, char** const argv) {
         // }
 
         // temp rendering code
+
+        // test drawing text
         glClearColor(.1f, .1f, .1f, 5.f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        // test drawing text
         char constexpr text[] = "hello";
         auto left = 0.f;
         auto top = 0.f;
@@ -318,15 +379,20 @@ int main(int argc, char** const argv) {
         auto const pixel_size = 2.f/window_height;
         for (int i=0; i<sizeof(text)-1; i++) {
             auto const c = text[i];
-            auto const optional_bitmap = big_charset.bitmap[c];
+            auto const optional_bitmap = small_charset.bitmap[c];
             if (optional_bitmap.has_value()) {
                 auto const bitmap = optional_bitmap.value();
                 auto const width = bitmap.width * pixel_size;
                 auto const height = bitmap.height * pixel_size;
-                render_character_bitmap(bitmap, left, top, left+width, top+height);
+                private_render_data.drawables.push_back(std::make_optional(render_character_bitmap(bitmap, left, top, left+width, top+height)));
                 left += width;
             }
+            draw_entity(private_render_data.drawables[0].value());
         }
+
+        // print_gl_errors("pre-render");
+        // for (auto const& entity : private_render_data.drawables)
+        // print_gl_errors("post-render");
 
         glfwSwapBuffers(window);
 

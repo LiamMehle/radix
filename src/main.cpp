@@ -1,5 +1,6 @@
 // main logic of the program
 // #define DEBUG_OUTPUT
+// #define DEBUG_FPS
 #include <cstdio>
 #include <cstdint>
 #include <cassert>
@@ -14,10 +15,10 @@
 #include "gl.h"
 #include "gl_tools.hpp"
 #include "utils.hpp"
-// #include "raii.cpp"  // marked for removal
 #include "functional.hpp"
 #include "global_config.hpp"
 #include "ros_event_loop.hpp"
+#include "types.hpp"
 
 static
 void error_callback(int, const char* err_str) {
@@ -26,32 +27,6 @@ void error_callback(int, const char* err_str) {
 
 namespace fs = std::filesystem;
 std::string binary_path = fs::canonical("/proc/self/exe").parent_path();
-static
-int x_error_handler(Display* display, XErrorEvent* event) {
-    puts("a");
-    return 0;
-}
-
-
-// data used for rendering of a frame
-enum PrivateRenderDataFlagBits {
-    perimeter_enabled = 1,
-};
-struct DrawCallInfo {
-    GLenum draw_mode;
-    GLuint vao;
-    GLuint vertex_offset;
-    GLuint vertex_count;
-};
-struct PrivateRenderData {
-    uint32_t flags;
-    DrawCallInfo point_cloud_draw_info;
-    DrawCallInfo perimeter_draw_info;
-};
-struct SizedVbo {
-    GLuint vbo;
-    GLint vertex_count;
-};
 
 static
 PrivateRenderData private_render_data;
@@ -81,16 +56,6 @@ void draw_window(GLFWwindow* window) {
     glfwSwapBuffers(window);
 }
 
-template <typename T>
-static
-GLuint convert_to_vbo(GLFWwindow* window, std::vector<T> const& verticies, GLenum const target) {
-    GLint const vertex_count = verticies.size();
-    GLint const required_buffer_size = sizeof(T) * vertex_count;
-    glBufferData(target, required_buffer_size, verticies.data(), GL_STATIC_DRAW);
-    return vertex_count;
-}
-
-
 int main(int argc, char** const argv) {
     ros::init(argc, argv, "radix_node");
     // initialize OpenGL
@@ -114,12 +79,8 @@ int main(int argc, char** const argv) {
     glfwSetInputMode(window, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
 
     // start ros-related thread
-    std::thread ros_thread = std::thread([&]{ros_event_loop(argc, argv, window);});
 
     // continue configuration of window/context
-    int frame_buffer_width, frame_buffer_height;
-    glfwGetFramebufferSize(window, &frame_buffer_width, &frame_buffer_height);
-
     glfwMakeContextCurrent(window);
 #ifndef NODEBUG
     printf("vendor:   %s\n", reinterpret_cast<char const*>(glGetString(GL_VENDOR)));
@@ -127,13 +88,12 @@ int main(int argc, char** const argv) {
 #endif
 
     glewExperimental = GL_TRUE;
-
     if (glewInit() != GLEW_OK) {
         puts("failed to init glew");
         return 3;
     }
 
-    glViewport(0, 0, frame_buffer_width, frame_buffer_height);
+    std::thread ros_thread = std::thread([&]{ros_event_loop(argc, argv, window);});
 
     // configure the perimeter render data because it is handled asynchronously
     GLuint point_cloud_vao, perimeter_vao, perimeter_vbo;
@@ -252,7 +212,7 @@ int main(int argc, char** const argv) {
         auto const t2 = std::chrono::steady_clock::now();
         auto const frametime = std::chrono::duration_cast<std::chrono::microseconds>(t2-t0);
         sleep_duration_adjustment = target_frametime-frametime;
-#ifndef NODEBUG
+#ifdef DEBUG_FPS
         // printf("vbo handle: %d\n", current_active_buffer().vbo);
         // printf("tri_count:  %zu\n", triangle_count);
         // printf("logic_time: %li us\n", logic_time.count());

@@ -14,7 +14,6 @@
 #include <sensor_msgs/PointCloud2.h>
 #include "gl.h"
 #include "gl_tools.hpp"
-#include "utils.hpp"
 #include "functional.hpp"
 #include "global_config.hpp"
 #include "ros_event_loop.hpp"

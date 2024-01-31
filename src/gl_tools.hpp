@@ -2,7 +2,6 @@
 
 #include <fstream>
 #include "gl.h"
-#include "utils.hpp"
 
 struct FullProgram {
     GLint program;

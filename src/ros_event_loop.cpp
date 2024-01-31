@@ -44,7 +44,8 @@ void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
         // 3 floats/point
         // 3 points/triangle
         // 2 triangles/input point except for top row and left column
-        auto const float_count = 3*3*2*((height)*(width-1) + (width));
+        auto const vertex_count = 3*2*((height)*(width-1) + (width));
+        auto const float_count = 3*vertex_count;
 
         GLint buffer_size;
         glGetBufferParameteriv(GL_COPY_WRITE_BUFFER, GL_BUFFER_SIZE, &buffer_size);
@@ -55,19 +56,24 @@ void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
         // typedef float Vertex[3];
         struct Vertex {float val[3];};
 
-        auto const __restrict buffer = reinterpret_cast<Vertex* __restrict__>(glMapBuffer(GL_COPY_WRITE_BUFFER, GL_WRITE_ONLY));
-        
+        Vertex* const __restrict buffer = reinterpret_cast<Vertex* __restrict__>(glMapBuffer(GL_COPY_WRITE_BUFFER, GL_WRITE_ONLY));
 
         for (size_t i=0; i<height-1; i++) {
             for (size_t j=0; j<width-1; j++) {
+                auto const row1 = i;
+                auto const row2 = i+1;
+                auto const col1 = j;
+                auto const col2 = j+1;
                 auto const to_vertex = [](CloudPoint const& p) -> Vertex { return Vertex { p.x, p.y, p.z }; };
-                auto const top_left  = point_array[i    *width+j  ];
-                auto const top_right = point_array[i    *width+j+1];
-                auto const bot_left  = point_array[(i+1)*width+j  ];
-                auto const bot_right = point_array[(i+1)*width+j+1];
+                auto const point_at = [point_array, width](size_t const i, size_t const j) -> CloudPoint const& { return point_array[i * width + j]; };
+                auto const top_left  = point_at(row1, col1);
+                auto const top_right = point_at(row1, col2);
+                auto const bot_left  = point_at(row2, col1);
+                auto const bot_right = point_at(row2, col2);
+
                 // triangle array is 1 element narrower and 1 element shorter than points
-                Vertex* point_cloud_iteration_ptr = &buffer[3*2*((i)*(width-1) + (j))];
-                // insert top left tri
+                Vertex* __restrict__ point_cloud_iteration_ptr = &buffer[3*2*((i)*(width-1) + (j))];
+
                 *point_cloud_iteration_ptr++ = to_vertex(top_left);
                 *point_cloud_iteration_ptr++ = to_vertex(top_right);
                 *point_cloud_iteration_ptr++ = to_vertex(bot_left);
@@ -76,9 +82,9 @@ void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
                 *point_cloud_iteration_ptr++ = to_vertex(bot_left);
             }
         }
-        transient_buffer->vertex_count = float_count / 3;
-        glBufferData(GL_COPY_WRITE_BUFFER, float_count*sizeof(float), buffer, GL_STREAM_DRAW);
+        transient_buffer->vertex_count = vertex_count;
     }
+    glUnmapBuffer(GL_COPY_WRITE_BUFFER);
     glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
     shared_render_data.inactive_buffer.store(nullptr, std::memory_order_release);
 }

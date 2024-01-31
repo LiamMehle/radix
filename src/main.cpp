@@ -59,6 +59,7 @@ void draw_window(GLFWwindow* window) {
 }
 
 int main(int argc, char** const argv) {
+    try {
     ros::init(argc, argv, "radix_node");
     // initialize OpenGL
     int status = 0;
@@ -146,6 +147,10 @@ int main(int argc, char** const argv) {
 
     glfwTerminate();
     return 0;
+    } catch (std::exception) {
+        // ???
+        return -1;
+    }
 }
 
 static

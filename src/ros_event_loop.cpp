@@ -58,6 +58,9 @@ void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
 
         Vertex* const __restrict buffer = reinterpret_cast<Vertex* __restrict__>(glMapBuffer(GL_COPY_WRITE_BUFFER, GL_WRITE_ONLY));
 
+        if (!buffer)
+            return;
+
         for (size_t i=0; i<height-1; i++) {
             for (size_t j=0; j<width-1; j++) {
                 auto const row1 = i;

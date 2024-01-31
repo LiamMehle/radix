@@ -102,7 +102,7 @@ void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
     shared_render_data.inactive_buffer.store(nullptr, std::memory_order_release);
 }
 
-void ros_event_loop(int argc, char** const argv, raii::Window const& window) {
+void ros_event_loop(int argc, char** const argv, GLFWwindow* window) {
     ros::NodeHandle n;
     
     auto transport_hints = ros::TransportHints();

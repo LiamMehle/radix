@@ -95,14 +95,14 @@ void draw_entity(DrawCallInfo const draw_info) {
 
     // configure textures
     for (int i=0; i<draw_info.texture_unit_count; i++) {
-        // glActiveTexture(GL_TEXTURE0 + i);  // selects the active texture UNIT, not texture itself
+        glActiveTexture(GL_TEXTURE0+i);  // selects the active texture UNIT, not texture itself
+        glBindTexture(GL_TEXTURE_2D, draw_info.texture_units[i].assigned_texture);
     }
 
     // draw
     glDisable(GL_COLOR_LOGIC_OP);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glBindTexture(GL_TEXTURE_2D, draw_info.texture_units[0].assigned_texture);
     glDrawArrays(draw_info.draw_mode, draw_info.vertex_offset, draw_info.vertex_count);
     glBindVertexArray(0);
 }

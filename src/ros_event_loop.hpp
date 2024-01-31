@@ -6,7 +6,7 @@
 #include <mutex>
 #include <atomic>
 
-void ros_event_loop(int argc, char** const argv, raii::Window const& window);
+void ros_event_loop(int argc, char** const argv, GLFWwindow* window);
 
 struct GLBufferObject {
     GLuint vbo;

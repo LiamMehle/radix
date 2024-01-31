@@ -52,44 +52,28 @@ void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
             // resize buffer
             glBufferData(GL_COPY_WRITE_BUFFER, float_count*sizeof(float), nullptr, GL_STREAM_DRAW);
 
-        float* __restrict buffer = static_cast<float*>(glMapBuffer(GL_COPY_WRITE_BUFFER, GL_WRITE_ONLY));
+        // typedef float Vertex[3];
+        struct Vertex {float val[3];};
+
+        auto const __restrict buffer = reinterpret_cast<Vertex* __restrict__>(glMapBuffer(GL_COPY_WRITE_BUFFER, GL_WRITE_ONLY));
         
-        
+
         for (size_t i=0; i<height-1; i++) {
             for (size_t j=0; j<width-1; j++) {
+                auto const to_vertex = [](CloudPoint const& p) -> Vertex { return Vertex { p.x, p.y, p.z }; };
                 auto const top_left  = point_array[i    *width+j  ];
                 auto const top_right = point_array[i    *width+j+1];
                 auto const bot_left  = point_array[(i+1)*width+j  ];
                 auto const bot_right = point_array[(i+1)*width+j+1];
-                size_t k = 0;
                 // triangle array is 1 element narrower and 1 element shorter than points
-                float* point_cloud_iteration_ptr = &buffer[3*3*2*((i)*(width-1) + (j))];
-
+                Vertex* point_cloud_iteration_ptr = &buffer[3*2*((i)*(width-1) + (j))];
                 // insert top left tri
-                point_cloud_iteration_ptr[k++] = top_left.x;
-                point_cloud_iteration_ptr[k++] = top_left.y;
-                point_cloud_iteration_ptr[k++] = top_left.z;
-
-                point_cloud_iteration_ptr[k++] = top_right.x;
-                point_cloud_iteration_ptr[k++] = top_right.y;
-                point_cloud_iteration_ptr[k++] = top_right.z;
-
-                point_cloud_iteration_ptr[k++] = bot_left.x;
-                point_cloud_iteration_ptr[k++] = bot_left.y;
-                point_cloud_iteration_ptr[k++] = bot_left.z;
-
-                // insert bottom right tri
-                point_cloud_iteration_ptr[k++] = top_right.x;
-                point_cloud_iteration_ptr[k++] = top_right.y;
-                point_cloud_iteration_ptr[k++] = top_right.z;
-
-                point_cloud_iteration_ptr[k++] = bot_right.x;
-                point_cloud_iteration_ptr[k++] = bot_right.y;
-                point_cloud_iteration_ptr[k++] = bot_right.z;
-
-                point_cloud_iteration_ptr[k++] = bot_left.x;
-                point_cloud_iteration_ptr[k++] = bot_left.y;
-                point_cloud_iteration_ptr[k++] = bot_left.z;
+                *point_cloud_iteration_ptr++ = to_vertex(top_left);
+                *point_cloud_iteration_ptr++ = to_vertex(top_right);
+                *point_cloud_iteration_ptr++ = to_vertex(bot_left);
+                *point_cloud_iteration_ptr++ = to_vertex(top_right);
+                *point_cloud_iteration_ptr++ = to_vertex(bot_right);
+                *point_cloud_iteration_ptr++ = to_vertex(bot_left);
             }
         }
         transient_buffer->vertex_count = float_count / 3;

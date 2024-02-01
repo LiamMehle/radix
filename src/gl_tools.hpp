@@ -27,8 +27,13 @@ GLenum print_gl_errors(char const* const where){ return GL_NO_ERROR; }
 
 static inline
 void configure_features() {
-    glDisable(GL_BLEND);
-    glEnable(GL_COLOR_LOGIC_OP);
+//    glDisable(GL_BLEND);
+//    glEnable(GL_COLOR_LOGIC_OP);
+
+    glEnable(GL_BLEND);
+    glDisable(GL_COLOR_LOGIC_OP);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
     glLogicOp(GL_COPY);
     glDisable(GL_CULL_FACE);
     glEnable(GL_DEBUG_OUTPUT);

@@ -54,9 +54,6 @@ void draw_entity(DrawCallInfo const draw_info) {
         glBindTexture(GL_TEXTURE_2D, draw_info.texture_units[i].assigned_texture);
     }
     // draw
-    glDisable(GL_COLOR_LOGIC_OP);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDrawArrays(draw_info.draw_mode, draw_info.vertex_offset, draw_info.vertex_count);
     glBindVertexArray(0);
 }

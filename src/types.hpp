@@ -16,15 +16,18 @@ struct TextureUnitConfig {
 };
 struct DrawCallInfo {
     GLuint vao;
+    GLint  program;
     GLenum draw_mode;
-    GLint vertex_offset;
-    GLint vertex_count;
+    GLuint vertex_offset;
+    GLuint vertex_count;
     uint32_t uniform_count;
     UniformConfig uniforms[UNIFORM_COUNT];
     uint32_t texture_unit_count;
     TextureUnitConfig texture_units[TEXTURE_UNIT_COUNT];
 };
 struct PrivateRenderData {
+    DrawCallInfo point_cloud;
+    DrawCallInfo perimeter;
     std::vector<std::optional<DrawCallInfo>> drawables;
 };
 struct TextRenderResource {

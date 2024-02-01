@@ -2,9 +2,7 @@
 
 #include "ros_event_loop.hpp"
 #include <sensor_msgs/PointCloud2.h>
-#include "global_config.hpp"
 #include "gl_tools.hpp"
-#include <chrono>
 #include <GLFW/glfw3.h>
 
 
@@ -21,7 +19,6 @@ GLFWwindow* offscreen_window;
 static
 void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
     // computational load of creating a valid set of data is dumped here as an alternative to the main render thread
-    size_t const point_count = cloud_msg.data.size()/sizeof(CloudPoint);
     {  // critical section
         // input data
         auto const point_array = reinterpret_cast<CloudPoint const*>(cloud_msg.data.data());
@@ -51,12 +48,12 @@ void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
         glGetBufferParameteriv(GL_COPY_WRITE_BUFFER, GL_BUFFER_SIZE, &buffer_size);
         if (buffer_size < float_count*sizeof(float))
             // resize buffer
-            glBufferData(GL_COPY_WRITE_BUFFER, float_count*sizeof(float), nullptr, GL_STREAM_DRAW);
+            glBufferData(GL_COPY_WRITE_BUFFER, static_cast<GLsizeiptr>(float_count*sizeof(float)), nullptr, GL_STREAM_DRAW);
 
         // typedef float Vertex[3];
         struct Vertex {float val[3];};
 
-        Vertex* const __restrict buffer = reinterpret_cast<Vertex* __restrict__>(glMapBuffer(GL_COPY_WRITE_BUFFER, GL_WRITE_ONLY));
+        auto buffer = reinterpret_cast<Vertex* __restrict>(glMapBuffer(GL_COPY_WRITE_BUFFER, GL_WRITE_ONLY));
 
         if (!buffer)
             return;
@@ -102,7 +99,7 @@ void ros_event_loop(int argc, char** const argv, GLFWwindow* window) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    offscreen_window = glfwCreateWindow(640, 480, "", NULL, window);
+    offscreen_window = glfwCreateWindow(640, 480, "", nullptr, window);
 
     ros::spin();
 }

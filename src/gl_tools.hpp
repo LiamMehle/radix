@@ -2,8 +2,6 @@
 
 #include <fstream>
 #include "gl.h"
-#include "utils.hpp"
-#include "raii.cpp"
 
 struct FullProgram {
     GLint program;
@@ -49,37 +47,6 @@ void configure_features() {
     glDisable(GL_STENCIL_TEST);
 }
 
-// sets the vsync state to the boolean passed in
-// returns true on success
-static inline
-bool set_vsync(bool const enabled) {
-    typedef void (*glXSwapIntervalEXT_t)(Display *dpy, GLXDrawable drawable, int interval);
-    
-    Display* display = glXGetCurrentDisplay();
-    if (!display) {
-        printf("[error]: failed to open X display\n");
-        return false;
-    }
-#ifndef NODEBUG
-    const char *glx_client_extensions = glXGetClientString(display, GLX_EXTENSIONS);
-    puts(glx_client_extensions);
-#endif
-
-    glXSwapIntervalEXT_t glXSwapIntervalEXT = 
-        (glXSwapIntervalEXT_t)glXGetProcAddress((const GLubyte*)"glXSwapIntervalEXT");
-    if (glXSwapIntervalEXT == nullptr) {
-        printf("[error]: glXSwapIntervalEXT not found\n");
-
-        return false;
-    }
-
-    GLXDrawable drawable = glXGetCurrentDrawable();
-
-    glXSwapIntervalEXT(display, drawable, enabled ? 1 : 0);
-
-    return true;
-}
-
 static inline
 std::string read_file(char const* const path) {
 
@@ -122,7 +89,7 @@ static inline
 GLint create_program(char const* const vertex_shader_path, char const* const fragment_shader_path) {
     // shaders:
     
-    raii::Program program{};
+    GLuint program = glCreateProgram();
     GLint vertex_shader   = shader_from_file(vertex_shader_path,   GL_VERTEX_SHADER);
     GLint fragment_shader = shader_from_file(fragment_shader_path, GL_FRAGMENT_SHADER);
     if (!vertex_shader || !fragment_shader)

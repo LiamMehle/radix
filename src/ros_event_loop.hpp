@@ -1,7 +1,6 @@
 #pragma once
 #include "ros/ros.h"
 #include "gl.h"
-#include "raii.cpp"
 #include <condition_variable>
 #include <mutex>
 #include <atomic>

@@ -2,9 +2,8 @@
 
 #include "ros_event_loop.hpp"
 #include <sensor_msgs/PointCloud2.h>
-#include "global_config.hpp"
 #include "gl_tools.hpp"
-#include <chrono>
+#include <GLFW/glfw3.h>
 
 
 #pragma pack(1)
@@ -20,7 +19,6 @@ GLFWwindow* offscreen_window;
 static
 void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
     // computational load of creating a valid set of data is dumped here as an alternative to the main render thread
-    size_t const point_count = cloud_msg.data.size()/sizeof(CloudPoint);
     {  // critical section
         // input data
         auto const point_array = reinterpret_cast<CloudPoint const*>(cloud_msg.data.data());
@@ -39,65 +37,54 @@ void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
             return;
 
         glfwMakeContextCurrent(offscreen_window);
-        print_gl_errors("early");
         glBindBuffer(GL_COPY_WRITE_BUFFER, transient_buffer->vbo);
-        print_gl_errors("bind buffer");
         // 3 floats/point
         // 3 points/triangle
         // 2 triangles/input point except for top row and left column
-        auto const float_count = 3*3*2*((height)*(width-1) + (width));
+        auto const vertex_count = 3*2*((height)*(width-1) + (width));
+        auto const float_count = 3*vertex_count;
 
         GLint buffer_size;
         glGetBufferParameteriv(GL_COPY_WRITE_BUFFER, GL_BUFFER_SIZE, &buffer_size);
         if (buffer_size < float_count*sizeof(float))
             // resize buffer
-            glBufferData(GL_COPY_WRITE_BUFFER, float_count*sizeof(float), nullptr, GL_STREAM_DRAW);
+            glBufferData(GL_COPY_WRITE_BUFFER, static_cast<GLsizeiptr>(float_count*sizeof(float)), nullptr, GL_STREAM_DRAW);
 
-        float* __restrict buffer = static_cast<float*>(glMapBuffer(GL_COPY_WRITE_BUFFER, GL_WRITE_ONLY));
-        
-        print_gl_errors("buffer storage");
-        
-        print_gl_errors("map buffer");
+        // typedef float Vertex[3];
+        struct Vertex {float val[3];};
+
+        auto buffer = reinterpret_cast<Vertex* __restrict>(glMapBuffer(GL_COPY_WRITE_BUFFER, GL_WRITE_ONLY));
+
+        if (!buffer)
+            return;
+
         for (size_t i=0; i<height-1; i++) {
             for (size_t j=0; j<width-1; j++) {
-                auto const top_left  = point_array[i    *width+j  ];
-                auto const top_right = point_array[i    *width+j+1];
-                auto const bot_left  = point_array[(i+1)*width+j  ];
-                auto const bot_right = point_array[(i+1)*width+j+1];
-                size_t k = 0;
+                auto const row1 = i;
+                auto const row2 = i+1;
+                auto const col1 = j;
+                auto const col2 = j+1;
+                auto const to_vertex = [](CloudPoint const& p) -> Vertex { return Vertex { p.x, p.y, p.z }; };
+                auto const point_at = [point_array, width](size_t const i, size_t const j) -> CloudPoint const& { return point_array[i * width + j]; };
+                auto const top_left  = point_at(row1, col1);
+                auto const top_right = point_at(row1, col2);
+                auto const bot_left  = point_at(row2, col1);
+                auto const bot_right = point_at(row2, col2);
+
                 // triangle array is 1 element narrower and 1 element shorter than points
-                float* point_cloud_iteration_ptr = &buffer[3*3*2*((i)*(width-1) + (j))];
+                Vertex* __restrict__ point_cloud_iteration_ptr = &buffer[3*2*((i)*(width-1) + (j))];
 
-                // insert top left tri
-                point_cloud_iteration_ptr[k++] = top_left.x;
-                point_cloud_iteration_ptr[k++] = top_left.y;
-                point_cloud_iteration_ptr[k++] = top_left.z;
-
-                point_cloud_iteration_ptr[k++] = top_right.x;
-                point_cloud_iteration_ptr[k++] = top_right.y;
-                point_cloud_iteration_ptr[k++] = top_right.z;
-
-                point_cloud_iteration_ptr[k++] = bot_left.x;
-                point_cloud_iteration_ptr[k++] = bot_left.y;
-                point_cloud_iteration_ptr[k++] = bot_left.z;
-
-                // insert bottom right tri
-                point_cloud_iteration_ptr[k++] = top_right.x;
-                point_cloud_iteration_ptr[k++] = top_right.y;
-                point_cloud_iteration_ptr[k++] = top_right.z;
-
-                point_cloud_iteration_ptr[k++] = bot_right.x;
-                point_cloud_iteration_ptr[k++] = bot_right.y;
-                point_cloud_iteration_ptr[k++] = bot_right.z;
-
-                point_cloud_iteration_ptr[k++] = bot_left.x;
-                point_cloud_iteration_ptr[k++] = bot_left.y;
-                point_cloud_iteration_ptr[k++] = bot_left.z;
+                *point_cloud_iteration_ptr++ = to_vertex(top_left);
+                *point_cloud_iteration_ptr++ = to_vertex(top_right);
+                *point_cloud_iteration_ptr++ = to_vertex(bot_left);
+                *point_cloud_iteration_ptr++ = to_vertex(top_right);
+                *point_cloud_iteration_ptr++ = to_vertex(bot_right);
+                *point_cloud_iteration_ptr++ = to_vertex(bot_left);
             }
         }
-        transient_buffer->vertex_count = float_count / 3;
-        glBufferData(GL_COPY_WRITE_BUFFER, float_count*sizeof(float), buffer, GL_STREAM_DRAW);
+        transient_buffer->vertex_count = vertex_count;
     }
+    glUnmapBuffer(GL_COPY_WRITE_BUFFER);
     glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
     shared_render_data.inactive_buffer.store(nullptr, std::memory_order_release);
 }
@@ -112,7 +99,7 @@ void ros_event_loop(int argc, char** const argv, GLFWwindow* window) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    offscreen_window = glfwCreateWindow(640, 480, "", NULL, window);
+    offscreen_window = glfwCreateWindow(640, 480, "", nullptr, window);
 
     ros::spin();
 }

@@ -1,14 +1,9 @@
-
 bin/radix_node
-
 bin/catkin_generated/
-
 bin/CMakeFiles/
-
 bin/gtest/googletest/CMakeFiles/gtest.dir/
-
 bin/gtest/googletest/CMakeFiles/gtest_main.dir/
-
 bin/gtest/googlemock/CMakeFiles/gmock_main.dir/
-
 bin/gtest/googlemock/CMakeFiles/gmock.dir/
+cmake-build-debug/
+.idea/

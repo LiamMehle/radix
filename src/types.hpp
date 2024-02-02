@@ -35,21 +35,20 @@ struct TextRenderResource {
     GLuint vao;
     GLint sampler_uniform_location;
     GLint pitch_uniform_location;
-    Charset<128> big_charset;
     Charset<128> small_charset;
 };
 struct DrawCallCleanupInfo {
     GLuint vao,vbo;
 };
 struct PersistentRenderState {
-    std::chrono::microseconds sleep_duration_adjustment, target_frametime;
+    std::chrono::microseconds sleep_duration_adjustment, target_frame_time;
     GLuint perimeter_vao, perimeter_vbo, point_cloud_vao;
     FullProgram point_cloud_program, perimeter_program;
     GLFWwindow* window;
     std::vector<struct CursorPosition> click_points;
     std::vector<struct DrawCallCleanupInfo> objects_for_cleanup;
     bool left_mouse_was_pressed;
-    std::array<GLBufferObject, 2> vbos;
+    std::array<GLBufferObject, 2> vertex_buffer_objects;
     std::chrono::_V2::steady_clock::time_point t0;
     uint_fast8_t current_active_buffer_id;
     TextRenderResource text_rendering_resource;

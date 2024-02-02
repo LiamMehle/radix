@@ -21,7 +21,6 @@ size_t constexpr TEXTURE_UNIT_COUNT = 4;
 
 #include "types.hpp"
 
-
 static
 PersistentRenderState refresh_render_state(PersistentRenderState state);
 
@@ -80,41 +79,107 @@ void draw_window(GLFWwindow *window) {
     glfwSwapBuffers(window);
 }
 
+std::optional<GLFWwindow *> create_context() {
+    // initialize OpenGL
+    glfwSetErrorCallback(error_callback);
+    auto const glfw = glfwInit();
+    if (glfw != GLFW_TRUE) {
+        std::puts("failed to initialize glfw");
+        return std::nullopt;
+    }
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+
+    auto const window = glfwCreateWindow(WIDTH, HEIGHT, "Radix", nullptr, nullptr);
+    if (!window) {
+        std::puts("failed to create a window");
+        return std::nullopt;
+    }
+    glfwSetInputMode(window, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
+
+    // start ros-related thread
+
+    // continue configuration of window/context
+    glfwMakeContextCurrent(window);
+    return window;
+}
+
+struct Programs {
+    FullProgram point_cloud, perimeter, text;
+};
+
+Programs init_programs() {
+    auto const point_cloud_vertex_shader_path = binary_path + "/point_cloud_vertex.glsl";
+    auto const point_cloud_fragment_shader_path = binary_path + "/point_cloud_fragment.glsl";
+    auto const perimeter_vertex_shader_path = binary_path + "/perimeter_vertex.glsl";
+    auto const perimeter_fragment_shader_path = binary_path + "/perimeter_fragment.glsl";
+    auto const text_vertex_shader_path = binary_path + "/text_vertex.glsl";
+    auto const text_fragment_shader_path = binary_path + "/text_fragment.glsl";
+    FullProgram const point_cloud_program = create_program_from_path(point_cloud_vertex_shader_path.c_str(),
+                                                                     point_cloud_fragment_shader_path.c_str());
+    FullProgram const perimeter_program = create_program_from_path(perimeter_vertex_shader_path.c_str(),
+                                                                   perimeter_fragment_shader_path.c_str());
+    FullProgram const text_program = create_program_from_path(text_vertex_shader_path.c_str(),
+                                                              text_fragment_shader_path.c_str());
+    return Programs{
+            .point_cloud = point_cloud_program,
+            .perimeter = perimeter_program,
+            .text = text_program,
+    };
+}
+
+struct CharsetGenerator {
+    FT_Library library;
+    FT_Face face;
+
+    ~CharsetGenerator() {
+        FT_Done_Face(this->face);
+        FT_Done_FreeType(this->library);
+    }
+};
+
+std::optional<CharsetGenerator> init_charset_generator(char const *const type_face_path) {
+    FT_Library library;
+    FT_Face face;
+
+    if (FT_Init_FreeType(&library))
+        return std::nullopt;
+
+    if (FT_New_Face(library, type_face_path, 0, &face))
+        return std::nullopt;
+
+    return CharsetGenerator{library, face};
+}
+
+template<int N, int M>
+Charset<M - N> create_charsets(CharsetGenerator const &generator, FT_UInt const em_height) {
+    FT_Set_Pixel_Sizes(generator.face, 0, em_height);
+    return load_charset<N, M>(generator.face);
+}
+
 int main(int argc, char **const argv) {
     try {
         ros::init(argc, argv, "radix_node");
-        // initialize OpenGL
-        glfwSetErrorCallback(error_callback);
-        auto const glfw = glfwInit();
-        if (glfw != GLFW_TRUE) {
-            std::puts("failed to initialize glfw");
-            return 3;
-        }
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
-        auto const window = glfwCreateWindow(WIDTH, HEIGHT, "Radix", nullptr, nullptr);
-        if (!window) {
-            std::puts("failed to create a window");
-            return 4;
-        }
-        glfwSetInputMode(window, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
-
-        // start ros-related thread
-
-        // continue configuration of window/context
-        glfwMakeContextCurrent(window);
 #ifndef NODEBUG
         std::printf("vendor:   %s\n", reinterpret_cast<char const *>(glGetString(GL_VENDOR)));
         std::printf("renderer: %s\n", reinterpret_cast<char const *>(glGetString(GL_RENDERER)));
 #endif
 
+        GLFWwindow *window = nullptr;
+        if (auto const maybe_window = create_context(); maybe_window.has_value())
+            window = maybe_window.value();
+        else {
+            std::puts("failed to init glfw window.");
+            return -1;
+        }
+
         glewExperimental = GL_TRUE;
         if (glewInit() != GLEW_OK) {
-            std::puts("failed to init glew");
-            return 5;
+            std::puts("failed to init glew.");
+            return -1;
         }
 
         std::thread ros_thread = std::thread([&] { ros_event_loop(argc, argv, window); });
@@ -132,64 +197,41 @@ int main(int argc, char **const argv) {
         }
 
         // shaders:
-        auto const point_cloud_vertex_shader_path = binary_path + "/point_cloud_vertex.glsl";
-        auto const point_cloud_fragment_shader_path = binary_path + "/point_cloud_fragment.glsl";
-        auto const perimeter_vertex_shader_path = binary_path + "/perimeter_vertex.glsl";
-        auto const perimeter_fragment_shader_path = binary_path + "/perimeter_fragment.glsl";
-        auto const text_vertex_shader_path = binary_path + "/text_vertex.glsl";
-        auto const text_fragment_shader_path = binary_path + "/text_fragment.glsl";
-        FullProgram const point_cloud_program = create_program_from_path(point_cloud_vertex_shader_path.c_str(),
-                                                                         point_cloud_fragment_shader_path.c_str());
-        FullProgram const perimeter_program = create_program_from_path(perimeter_vertex_shader_path.c_str(),
-                                                                       perimeter_fragment_shader_path.c_str());
-        FullProgram const text_program = create_program_from_path(text_vertex_shader_path.c_str(),
-                                                                  text_fragment_shader_path.c_str());
+        auto const programs = init_programs();
         // enable vsync if present:
         // set_vsync(true);
+        auto const charset_generator_maybe = init_charset_generator(
+                "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSans.ttf");
+        if (!charset_generator_maybe.has_value())
+            return -1;
+        auto const &charset_generator = charset_generator_maybe.value();
+        auto small_charset = create_charsets<0, 128>(charset_generator, 72);
 
-        FT_Library library;
-        if (FT_Init_FreeType(&library)) {
-            std::puts("failed to initialize freetype");
-            return 1;
-        }
-        FT_Face face;
-        if (FT_New_Face(library, "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSans.ttf", 0, &face)) {
-            std::puts("failed to acquire typeface");
-            return 2;
-        }
-//    FT_Set_Char_Size(face,0,72 * 64 + 32, 300, 300);
-        FT_Set_Pixel_Sizes(face, 0, 48);
-        auto const big_charset = load_charset<0, 128>(face);
-//    FT_Set_Char_Size(face,0,12 * 64 + 32, 300, 300);
-        FT_Set_Pixel_Sizes(face, 0, 48);
-        auto const small_charset = load_charset<0, 128>(face);
-        FT_Done_FreeType(library);
 
         using namespace std::chrono_literals;
         auto constexpr target_frametime = (1000000us) / global_base_rate;
         configure_features();
         TextRenderResource text_rendering_resource = {
-                .program = text_program,
-                .sampler_uniform_location = glGetUniformLocation(text_program.program, "text_bitmap"),
-                .pitch_uniform_location = glGetUniformLocation(text_program.program, "pitch"),
-                .big_charset = big_charset,
+                .program = programs.text,
+                .sampler_uniform_location = glGetUniformLocation(programs.text.program, "text_bitmap"),
+                .pitch_uniform_location = glGetUniformLocation(programs.text.program, "pitch"),
                 .small_charset = small_charset,
         };
         glGenVertexArrays(1, &text_rendering_resource.vao);
 
         PersistentRenderState render_state{
                 .sleep_duration_adjustment = 0us,
-                .target_frametime = target_frametime,
+                .target_frame_time = target_frametime,
                 .perimeter_vao = perimeter_vao,
                 .perimeter_vbo = perimeter_vbo,
                 .point_cloud_vao = point_cloud_vao,
-                .point_cloud_program = point_cloud_program,
-                .perimeter_program = perimeter_program,
+                .point_cloud_program = programs.point_cloud,
+                .perimeter_program = programs.perimeter,
                 .window = window,
                 .click_points = {},
                 .objects_for_cleanup = {},
                 .left_mouse_was_pressed = false,
-                .vbos = vbos,
+                .vertex_buffer_objects = vbos,
                 .t0 = std::chrono::steady_clock::now(),
                 .current_active_buffer_id = 0,
                 .text_rendering_resource = text_rendering_resource,
@@ -251,7 +293,7 @@ PersistentRenderState refresh_render_state(PersistentRenderState state) {
 
     // GL buffer id of buffer with data being streamed in, in a background context
     uint_fast8_t const current_inactive_buffer_id = state.current_active_buffer_id ? 0 : 1;
-    auto const current_active_buffer = [&]() -> GLBufferObject & { return state.vbos[state.current_active_buffer_id]; };
+    auto const current_active_buffer = [&]() -> GLBufferObject & { return state.vertex_buffer_objects[state.current_active_buffer_id]; };
 
     GLBufferObject *null = nullptr;
     auto const buffer_swap_success = shared_render_data.inactive_buffer.compare_exchange_weak(
@@ -318,20 +360,6 @@ PersistentRenderState refresh_render_state(PersistentRenderState state) {
         glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
         glEnableVertexAttribArray(0);
 
-#ifdef DEBUG_FT
-        {
-            auto buffer = static_cast<uint8_t*>(alloca(bitmap.width*bitmap.height));
-            glReadPixels(0, 0, bitmap.width, bitmap.height, GL_RED, GL_UNSIGNED_BYTE, buffer);
-            for (int i=0; i<bitmap.height; i++) {
-                for (int j=0; j<bitmap.width; j++) {
-                    putchar(buffer[i*bitmap.pitch+j] >= 1 ? '#' : ' ');
-                }
-                puts("");
-            }
-            puts("'''''''''''''");
-        }
-#endif
-
         return std::pair<DrawCallInfo, DrawCallCleanupInfo>{
                 DrawCallInfo{
                         .vao = vao,
@@ -367,6 +395,14 @@ PersistentRenderState refresh_render_state(PersistentRenderState state) {
                 }
         };
     };
+
+    // clean up all the objects no longer in use
+    for (auto const &object: state.objects_for_cleanup) {
+        glDeleteVertexArrays(1, &object.vao);
+        glDeleteBuffers(1, &object.vbo);
+    }
+    state.objects_for_cleanup.clear();
+
     char constexpr text[] = "hello";
     auto top = 0.f;
     auto left = 0.f;
@@ -387,26 +423,21 @@ PersistentRenderState refresh_render_state(PersistentRenderState state) {
             left += width;
         }
     }
-//    for (auto const &entity: private_render_data.drawables)
-//        if (entity.has_value())
-//            draw_entity(entity.value());
-//    glfwSwapBuffers(state.window);
 
-
-     if (should_redraw)
-         draw_window(state.window);
+    if (should_redraw)
+        draw_window(state.window);
 
     // // logic time end
     // auto const t1 = std::chrono::steady_clock::now();
     // auto const logic_time = std::chrono::duration_cast<std::chrono::microseconds>(t1-state.t0);
     // // adjustment is divided by 2 as a heuristic (avoid large +/- swings, effectively P from PID with factor of .5)
-    // auto const time_to_sleep_for = state.target_frametime - logic_time + (state.sleep_duration_adjustment/2);
+    // auto const time_to_sleep_for = state.target_frame_time - logic_time + (state.sleep_duration_adjustment/2);
     // // max prevents underflow
     // usleep(max(static_cast<int64_t>(0), std::chrono::duration_cast<std::chrono::microseconds>(time_to_sleep_for).count()));
     // // end of frame time (printing is not included, *though it should be*)
     // auto const t2 = std::chrono::steady_clock::now();
     // auto const frametime = std::chrono::duration_cast<std::chrono::microseconds>(t2-state.t0);
-    // state.sleep_duration_adjustment = state.target_frametime-frametime;
+    // state.sleep_duration_adjustment = state.target_frame_time-frametime;
 #ifdef DEBUG_FPS
     printf("vbo handle: %d\n", current_active_buffer().vbo);
     printf("tri_count:  %zu\n", triangle_count);

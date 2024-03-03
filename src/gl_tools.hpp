@@ -67,7 +67,7 @@ std::string read_file(char const* const path) {
 }
 
 static inline
-GLint compile_shader(std::string const& src, GLenum const type) {
+GLint compile_shader(std::string const& src, GLenum const type, char const* filename = "") {
     GLint shader = glCreateShader(type);
     GLint success;
     std::vector<GLchar> program_log(1024, 0);
@@ -78,7 +78,7 @@ GLint compile_shader(std::string const& src, GLenum const type) {
     glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
     if (!success) {
         glGetShaderInfoLog(shader, program_log.size(), nullptr, program_log.data());
-        printf("[error]: %s\n", program_log.data());
+        printf("[error]: %s: %s\n", filename, program_log.data());
         return 0;
     }
     return shader;
@@ -87,51 +87,54 @@ GLint compile_shader(std::string const& src, GLenum const type) {
 static inline
 GLint shader_from_file(char const* filename, GLenum const type) {
     auto const source = read_file(filename);
-    return compile_shader(source, type);
+    return compile_shader(source, type, filename);
 }
 
-static inline
-GLint create_program(char const* const vertex_shader_path, char const* const fragment_shader_path) {
-    // shaders:
+// static inline
+// GLint create_program(char const* const vertex_shader_path, char const* const fragment_shader_path) {
+//     // shaders:
     
-    GLuint program = glCreateProgram();
-    GLint vertex_shader   = shader_from_file(vertex_shader_path,   GL_VERTEX_SHADER);
-    GLint fragment_shader = shader_from_file(fragment_shader_path, GL_FRAGMENT_SHADER);
-    if (!vertex_shader || !fragment_shader)
-        return 5;
+//     GLuint program = glCreateProgram();
+//     GLint vertex_shader   = shader_from_file(vertex_shader_path,   GL_VERTEX_SHADER);
+//     GLint fragment_shader = shader_from_file(fragment_shader_path, GL_FRAGMENT_SHADER);
+//     if (!vertex_shader || !fragment_shader)
+//         return 5;
 
-    glAttachShader(program, vertex_shader);
-    glAttachShader(program, fragment_shader);
-    glLinkProgram(program);
+//     glAttachShader(program, vertex_shader);
+//     glAttachShader(program, fragment_shader);
+//     glLinkProgram(program);
 
-    {
-        GLint result;
-        glGetProgramiv(program, GL_LINK_STATUS, &result);
-        if (!result) {
-            std::vector<GLchar> program_log(1024, 0);
-            glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
-            printf("[error]: %s\n", program_log.data());
-            return 6;
-        }
-        glValidateProgram(program);
-        glGetProgramiv(program, GL_LINK_STATUS, &result);
-        if (!result) {
-            std::vector<GLchar> program_log(1024, 0);
-            glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
-            printf("[error]: %s\n", program_log.data());
-            return 7;
-        }
-    }
-    return program;
-}
+//     {
+//         GLint result;
+//         glGetProgramiv(program, GL_LINK_STATUS, &result);
+//         if (!result) {
+//             std::vector<GLchar> program_log(1024, 0);
+//             glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
+//             printf("[error]: %s\n", program_log.data());
+//             return 6;
+//         }
+//         glValidateProgram(program);
+//         glGetProgramiv(program, GL_LINK_STATUS, &result);
+//         if (!result) {
+//             std::vector<GLchar> program_log(1024, 0);
+//             glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
+//             printf("[error]: %s\n", program_log.data());
+//             return 7;
+//         }
+//     }
+//     return program;
+// }
 
 static inline
-FullProgram create_program_from_path(char const* const vertex_shader_src_path, char const* const fragment_shader_src_path) {
+FullProgram create_program_from_path(char const* const vertex_shader_src_path, char const* const geometry_shader_src_path, char const* const fragment_shader_src_path) {
     GLint program         = glCreateProgram();
     GLint fragment_shader = shader_from_file(fragment_shader_src_path, GL_FRAGMENT_SHADER);
+    GLint geometry_shader = geometry_shader_src_path != nullptr ? shader_from_file(geometry_shader_src_path, GL_GEOMETRY_SHADER) : 0;
     GLint vertex_shader   = shader_from_file(vertex_shader_src_path,   GL_VERTEX_SHADER);
 
     glAttachShader(program, vertex_shader);
+    if (geometry_shader_src_path != nullptr)
+        glAttachShader(program, geometry_shader);
     glAttachShader(program, fragment_shader);
     glLinkProgram(program);
 

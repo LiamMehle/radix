@@ -13,6 +13,7 @@
 #include "global_config.hpp"
 #include "ros_event_loop.hpp"
 #include "text.hpp"
+#include <initializer_list>
 
 static
 size_t constexpr UNIFORM_COUNT = 4;
@@ -36,30 +37,6 @@ static
 PrivateRenderData private_render_data;
 ExposedRenderData shared_render_data = {nullptr};  // state of the GL thread exposed to other threads
 
-static
-void draw_entity(DrawCallInfo const draw_info) {
-    // bind Vertex data
-    glBindVertexArray(draw_info.vao);
-    glUseProgram(draw_info.program);
-
-    // configure uniforms
-    for (int i = 0; i < draw_info.uniform_count; i++) {
-        switch (draw_info.uniforms[i].type) {
-            case UniformConfig::UniformType::Integer1:
-                glUniform1i(draw_info.uniforms[i].location, draw_info.uniforms[i].value.integer);
-        }
-    }
-    // configure textures
-    for (int i = 0; i < draw_info.texture_unit_count; i++) {
-        glActiveTexture(GL_TEXTURE0 + i);  // selects the active texture UNIT, not texture itself
-        glBindTexture(GL_TEXTURE_2D, draw_info.texture_units[i].assigned_texture);
-    }
-    // draw
-    glDrawArrays(draw_info.draw_mode, static_cast<GLint>(draw_info.vertex_offset),
-                 static_cast<GLint>(draw_info.vertex_count));
-    glBindVertexArray(0);
-}
-
 // window redraw callback, do not call directly, use draw_point_cloud instead
 // assumes private render data contains all relevant correct data and *only draws (based on) said data to the screen*
 static
@@ -69,12 +46,12 @@ void draw_window(GLFWwindow *window) {
     glClearColor(.1f, .1f, .1f, 5.f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    draw_entity(private_render_data.point_cloud);
-    draw_entity(private_render_data.perimeter);
+    private_render_data.point_cloud.draw();
+    private_render_data.perimeter.draw();
 
-    for (auto const &maybe_drawable: private_render_data.drawables)
+    for (auto const& maybe_drawable: private_render_data.drawables)
         if (maybe_drawable.has_value())
-            draw_entity(maybe_drawable.value());
+            maybe_drawable.value().draw();
 
     glfwSwapBuffers(window);
 }
@@ -112,16 +89,20 @@ struct Programs {
 
 Programs init_programs() {
     auto const point_cloud_vertex_shader_path = binary_path + "/point_cloud_vertex.glsl";
+    auto const point_cloud_geometry_shader_path = binary_path + "/point_cloud_geometry.glsl";
     auto const point_cloud_fragment_shader_path = binary_path + "/point_cloud_fragment.glsl";
     auto const perimeter_vertex_shader_path = binary_path + "/perimeter_vertex.glsl";
     auto const perimeter_fragment_shader_path = binary_path + "/perimeter_fragment.glsl";
     auto const text_vertex_shader_path = binary_path + "/text_vertex.glsl";
     auto const text_fragment_shader_path = binary_path + "/text_fragment.glsl";
     FullProgram const point_cloud_program = create_program_from_path(point_cloud_vertex_shader_path.c_str(),
+                                                                    point_cloud_geometry_shader_path.c_str(),
                                                                      point_cloud_fragment_shader_path.c_str());
     FullProgram const perimeter_program = create_program_from_path(perimeter_vertex_shader_path.c_str(),
+                                                                    nullptr,
                                                                    perimeter_fragment_shader_path.c_str());
     FullProgram const text_program = create_program_from_path(text_vertex_shader_path.c_str(),
+                                                                    nullptr,
                                                               text_fragment_shader_path.c_str());
     return Programs{
             .point_cloud = point_cloud_program,
@@ -133,11 +114,6 @@ Programs init_programs() {
 struct CharsetGenerator {
     FT_Library library;
     FT_Face face;
-
-    ~CharsetGenerator() {
-        FT_Done_Face(this->face);
-        FT_Done_FreeType(this->library);
-    }
 };
 
 std::optional<CharsetGenerator> init_charset_generator(char const *const type_face_path) {
@@ -160,95 +136,90 @@ Charset<M - N> create_charsets(CharsetGenerator const &generator, FT_UInt const 
 }
 
 int main(int argc, char **const argv) {
-    try {
-        ros::init(argc, argv, "radix_node");
+    ros::init(argc, argv, "radix_node");
 
 #ifndef NODEBUG
-        std::printf("vendor:   %s\n", reinterpret_cast<char const *>(glGetString(GL_VENDOR)));
-        std::printf("renderer: %s\n", reinterpret_cast<char const *>(glGetString(GL_RENDERER)));
+    std::printf("vendor:   %s\n", reinterpret_cast<char const *>(glGetString(GL_VENDOR)));
+    std::printf("renderer: %s\n", reinterpret_cast<char const *>(glGetString(GL_RENDERER)));
 #endif
 
-        GLFWwindow *window = nullptr;
-        if (auto const maybe_window = create_context(); maybe_window.has_value())
-            window = maybe_window.value();
-        else {
-            std::puts("failed to init glfw window.");
-            return -1;
-        }
-
-        glewExperimental = GL_TRUE;
-        if (glewInit() != GLEW_OK) {
-            std::puts("failed to init glew.");
-            return -1;
-        }
-
-        std::thread ros_thread = std::thread([&] { ros_event_loop(argc, argv, window); });
-
-        // configure the perimeter render data because it is handled asynchronously
-        GLuint point_cloud_vao, perimeter_vao, perimeter_vbo;
-        glGenVertexArrays(1, &perimeter_vao);
-        glGenBuffers(1, &perimeter_vbo);
-
-        glGenVertexArrays(1, &point_cloud_vao);
-        std::array<GLBufferObject, 2> vbos{0};
-        for (auto &vbo: vbos) {
-            glGenBuffers(1, &vbo.vbo);
-            vbo.vertex_count = 0;
-        }
-
-        // shaders:
-        auto const programs = init_programs();
-        // enable vsync if present:
-        // set_vsync(true);
-        auto const charset_generator_maybe = init_charset_generator(
-                "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSans.ttf");
-        if (!charset_generator_maybe.has_value())
-            return -1;
-        auto const &charset_generator = charset_generator_maybe.value();
-        auto small_charset = create_charsets<0, 128>(charset_generator, 72);
-
-
-        using namespace std::chrono_literals;
-        auto constexpr target_frametime = (1000000us) / global_base_rate;
-        configure_features();
-        TextRenderResource text_rendering_resource = {
-                .program = programs.text,
-                .sampler_uniform_location = glGetUniformLocation(programs.text.program, "text_bitmap"),
-                .pitch_uniform_location = glGetUniformLocation(programs.text.program, "pitch"),
-                .small_charset = small_charset,
-        };
-        glGenVertexArrays(1, &text_rendering_resource.vao);
-
-        PersistentRenderState render_state{
-                .sleep_duration_adjustment = 0us,
-                .target_frame_time = target_frametime,
-                .perimeter_vao = perimeter_vao,
-                .perimeter_vbo = perimeter_vbo,
-                .point_cloud_vao = point_cloud_vao,
-                .point_cloud_program = programs.point_cloud,
-                .perimeter_program = programs.perimeter,
-                .window = window,
-                .click_points = {},
-                .objects_for_cleanup = {},
-                .left_mouse_was_pressed = false,
-                .vertex_buffer_objects = vbos,
-                .t0 = std::chrono::steady_clock::now(),
-                .current_active_buffer_id = 0,
-                .text_rendering_resource = text_rendering_resource,
-        };
-        glfwSetWindowRefreshCallback(window, draw_window);
-        while (!glfwWindowShouldClose(window))
-            render_state = refresh_render_state(std::move(render_state));
-
-        for (auto &vbo: vbos)
-            glDeleteBuffers(1, &vbo.vbo);
-
-        glfwTerminate();
-        return 0;
-    } catch (std::exception &) {
-        // ???
+    GLFWwindow *window = nullptr;
+    if (auto const maybe_window = create_context(); maybe_window.has_value())
+        window = maybe_window.value();
+    else {
+        std::puts("failed to init glfw window.");
         return -1;
     }
+
+    glewExperimental = GL_TRUE;
+    if (glewInit() != GLEW_OK) {
+        std::puts("failed to init glew.");
+        return -1;
+    }
+
+    std::thread ros_thread = std::thread([&] { ros_event_loop(argc, argv, window); });
+
+    // configure the perimeter render data because it is handled asynchronously
+    GLuint point_cloud_vao, perimeter_vao, perimeter_vbo;
+    glGenVertexArrays(1, &perimeter_vao);
+    glGenBuffers(1, &perimeter_vbo);
+
+    glGenVertexArrays(1, &point_cloud_vao);
+    std::array<GLBufferObject, 2> vbos{0};
+    for (auto &vbo: vbos) {
+        glGenBuffers(1, &vbo.vbo);
+        vbo.vertex_count = 0;
+    }
+
+    // shaders:
+    auto const programs = init_programs();
+    // enable vsync if present:
+    // set_vsync(true);
+    auto const charset_generator_maybe = init_charset_generator(
+            "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSans.ttf");
+    if (!charset_generator_maybe.has_value())
+        return -1;
+    auto const &charset_generator = charset_generator_maybe.value();
+    auto small_charset = create_charsets<0, 128>(charset_generator, 52);
+
+
+    using namespace std::chrono_literals;
+    auto constexpr target_frametime = (1000000us) / global_base_rate;
+    configure_features();
+    TextRenderResource text_rendering_resource = {
+            .program = programs.text,
+            .sampler_uniform_location = glGetUniformLocation(programs.text.program, "text_bitmap"),
+            .pitch_uniform_location = glGetUniformLocation(programs.text.program, "pitch"),
+            .small_charset = small_charset,
+    };
+    glGenVertexArrays(1, &text_rendering_resource.vao);
+
+    PersistentRenderState render_state{
+            .sleep_duration_adjustment = 0us,
+            .target_frame_time = target_frametime,
+            .perimeter_vao = perimeter_vao,
+            .perimeter_vbo = perimeter_vbo,
+            .point_cloud_vao = point_cloud_vao,
+            .point_cloud_program = programs.point_cloud,
+            .perimeter_program = programs.perimeter,
+            .window = window,
+            .click_points = {},
+            .objects_for_cleanup = {},
+            .left_mouse_was_pressed = false,
+            .vertex_buffer_objects = vbos,
+            .t0 = std::chrono::steady_clock::now(),
+            .current_active_buffer_id = 0,
+            .text_rendering_resource = text_rendering_resource,
+    };
+    glfwSetWindowRefreshCallback(window, draw_window);
+    while (!glfwWindowShouldClose(window))
+        render_state = refresh_render_state(std::move(render_state));
+
+    for (auto &vbo: vbos)
+        glDeleteBuffers(1, &vbo.vbo);
+
+    glfwTerminate();
+    return 0;
 }
 
 static
@@ -261,7 +232,6 @@ PersistentRenderState refresh_render_state(PersistentRenderState state) {
     if (left_mouse_is_pressed && (!state.left_mouse_was_pressed)) {
         should_redraw |= true;
         // update perimeter display
-        // todo: wait for last transfer to finish before updating
         // click points due to iterator invalidation
 
         // setup draw info
@@ -368,6 +338,7 @@ PersistentRenderState refresh_render_state(PersistentRenderState state) {
                         .vertex_offset = 0,
                         .vertex_count = 6,
                         .uniform_count = 2,
+                        .texture_unit_count = 1,
                         .uniforms = {
                                 UniformConfig{
                                         .type = UniformConfig::UniformType::Integer1,
@@ -384,7 +355,6 @@ PersistentRenderState refresh_render_state(PersistentRenderState state) {
                                         },
                                 },
                         },
-                        .texture_unit_count = 1,
                         .texture_units = {
                                 bitmap.texture,
                         },
@@ -403,9 +373,9 @@ PersistentRenderState refresh_render_state(PersistentRenderState state) {
     }
     state.objects_for_cleanup.clear();
 
-    char constexpr text[] = "hello";
-    auto top = 0.f;
-    auto left = 0.f;
+    char constexpr text[] = "POSITIONING";
+    auto top = -.8f;
+    auto left = -.2f;
     int window_width, window_height;
     glfwGetWindowSize(state.window, &window_width, &window_height);
 
@@ -417,10 +387,12 @@ PersistentRenderState refresh_render_state(PersistentRenderState state) {
             auto const bitmap = optional_bitmap.value();
             auto const width = static_cast<float>(bitmap.width) * pixel_size;
             auto const height = static_cast<float>(bitmap.height) * pixel_size;
-            auto [render_info, cleanup_info] = render_character_bitmap(bitmap, left, top, left + width, top + height);
+            auto const local_left = left; // + bitmap.left * pixel_size;
+            auto const local_top = top; // + bitmap.top * pixel_size;
+            auto [render_info, cleanup_info] = render_character_bitmap(bitmap, local_left, local_top, local_left + width, local_top + height);
             private_render_data.drawables.emplace_back(render_info);
             state.objects_for_cleanup.emplace_back(cleanup_info);
-            left += width;
+            left += width+2*pixel_size;
         }
     }
 

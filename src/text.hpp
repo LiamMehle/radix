@@ -3,6 +3,7 @@
 #include <optional>
 #include <cstdint>
 #include <ft2build.h>
+#include <GL/gl.h>
 #include FT_FREETYPE_H
 
 struct Bitmap {
@@ -10,6 +11,8 @@ struct Bitmap {
     uint32_t width;             // size 4,  align 4
     uint32_t height;            // size 4,  align 4
     int32_t  pitch;             // size 4,  align 4
+    int32_t  left;              // size 4,  align 4
+    int32_t  top;               // size 4,  align 4
 };
 std::optional<Bitmap> get_bitmap(FT_Face const face, char const c) {
     /* load glyph image into the slot (erase previous one) */
@@ -20,6 +23,8 @@ std::optional<Bitmap> get_bitmap(FT_Face const face, char const c) {
     auto const bitmap_pitch = face->glyph->bitmap.pitch;
     auto const bitmap_height = face->glyph->bitmap.rows;
     auto const bitmap_buffer = face->glyph->bitmap.buffer;
+    auto const bitmap_left = face->glyph->bitmap_left;
+    auto const bitmap_top = face->glyph->bitmap_top;
 #ifdef DEBUG_FT
     for (int i=0; i<bitmap_height; i++) {
         for (int j=0; j<bitmap_width; j++) {
@@ -60,6 +65,8 @@ std::optional<Bitmap> get_bitmap(FT_Face const face, char const c) {
                                       .width = bitmap_width,
                                       .height = bitmap_height,
                                       .pitch = bitmap_pitch,
+                                      .left = bitmap_left,
+                                      .top = bitmap_top
                               });
 }
 

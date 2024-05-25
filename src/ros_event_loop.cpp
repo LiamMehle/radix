@@ -28,8 +28,8 @@ void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
         auto const row_step = cloud_msg.row_step;
 
         if (height < 2
-         || width < 2 
-         || row_step < width*2*sizeof(float))
+         || width < 2 )
+         // || row_step < width*2*sizeof(float))
             return;
         
         auto const transient_buffer = shared_render_data.inactive_buffer.load(std::memory_order_consume);

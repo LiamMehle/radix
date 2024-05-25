@@ -14,11 +14,14 @@
 #include "ros_event_loop.hpp"
 #include "text.hpp"
 #include <initializer_list>
+#include <ctime>
 
 static
 size_t constexpr UNIFORM_COUNT = 4;
 static
 size_t constexpr TEXTURE_UNIT_COUNT = 4;
+
+std::timespec last_update = {0};
 
 #include "types.hpp"
 
@@ -182,7 +185,6 @@ int main(int argc, char **const argv) {
     auto const &charset_generator = charset_generator_maybe.value();
     auto small_charset = create_charsets<0, 128>(charset_generator, 52);
 
-
     using namespace std::chrono_literals;
     auto constexpr target_frametime = (1000000us) / global_base_rate;
     configure_features();
@@ -215,6 +217,7 @@ int main(int argc, char **const argv) {
     while (!glfwWindowShouldClose(window))
         render_state = refresh_render_state(std::move(render_state));
 
+    clock_gettime(CLOCK_MONOTONIC, &last_update);
     for (auto &vbo: vbos)
         glDeleteBuffers(1, &vbo.vbo);
 
@@ -222,19 +225,27 @@ int main(int argc, char **const argv) {
     return 0;
 }
 
+#define UPDATE_INTERVAL 33333
+
 static
 PersistentRenderState refresh_render_state(PersistentRenderState state) {
     bool should_redraw = false;
+    std::timespec current_time;
+    clock_gettime(CLOCK_MONOTONIC, &current_time);
+    auto elapsed_time_ns = (current_time.tv_sec - last_update.tv_sec)*1000*1000*1000 + (current_time.tv_nsec - last_update.tv_nsec);
+    auto time_to_wait_for = UPDATE_INTERVAL - (elapsed_time_ns / 1000);
+    if ((time_to_wait_for > 0) && (time_to_wait_for < UPDATE_INTERVAL))
+    	usleep(time_to_wait_for);
+    clock_gettime(CLOCK_MONOTONIC, &last_update);
+
+    //printf("%ld\n", time_to_wait_for);
+
     private_render_data.drawables.clear();
     // bool should_redraw = false;
     glfwPollEvents();
     bool const left_mouse_is_pressed = glfwGetMouseButton(state.window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     if (left_mouse_is_pressed && (!state.left_mouse_was_pressed)) {
-        should_redraw |= true;
-        // update perimeter display
-        // click points due to iterator invalidation
-
-        // setup draw info
+        should_redraw |= true; // update perimeter display click points due to iterator invalidation setup draw info
         auto cursor_pos = get_cursor_pos(state.window);
         state.click_points.push_back(cursor_pos);
         DrawCallInfo draw_info = {0};// = private_render_data.perimeter_draw_info;

@@ -65,7 +65,7 @@ void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
                 auto const col1 = j;
                 auto const col2 = j+1;
                 auto const to_vertex = [](CloudPoint const& p) -> Vertex { return Vertex { p.x, p.y, p.z }; };
-                auto const point_at = [point_array, width](size_t const i, size_t const j) -> CloudPoint const& { return point_array[i * width + j]; };
+                auto const point_at = [point_array, width](size_t const i, size_t const j) -> CloudPoint { return point_array[i * width + j]; };
                 auto const top_left  = point_at(row1, col1);
                 auto const top_right = point_at(row1, col2);
                 auto const bot_left  = point_at(row2, col1);

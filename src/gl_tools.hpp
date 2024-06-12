@@ -1,13 +1,39 @@
 #pragma once
 
+#include <fstream>
 #include "gl.h"
-#include "utils.hpp"
-#include "raii.cpp"
+
+struct FullProgram {
+    GLint program;
+    GLint vertex_shader;
+    GLint fragment_shader;
+};
+
+#ifndef DEBUG_OUTPUT
+#include <cstdio>
+static inline
+GLenum print_gl_errors(char const* const where) {
+    GLenum error = glGetError();
+    while (error != GL_NO_ERROR) {
+        printf("%s:\t%s\n", where, gluErrorString(error));
+        error = glGetError();
+    }
+    return error;
+}
+#else
+static inline
+GLenum print_gl_errors(char const* const where){ return GL_NO_ERROR; }
+#endif
 
 static inline
 void configure_features() {
-    glDisable(GL_BLEND);
-    glEnable(GL_COLOR_LOGIC_OP);
+//    glDisable(GL_BLEND);
+//    glEnable(GL_COLOR_LOGIC_OP);
+
+    glEnable(GL_BLEND);
+    glDisable(GL_COLOR_LOGIC_OP);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
     glLogicOp(GL_COPY);
     glDisable(GL_CULL_FACE);
     glEnable(GL_DEBUG_OUTPUT);
@@ -26,38 +52,7 @@ void configure_features() {
     glDisable(GL_STENCIL_TEST);
 }
 
-// sets the vsync state to the boolean passed in
-// returns true on success
-static
-inline
-bool set_vsync(bool const enabled) {
-    typedef void (*glXSwapIntervalEXT_t)(Display *dpy, GLXDrawable drawable, int interval);
-    
-    Display* display = glXGetCurrentDisplay();
-    if (!display) {
-        printf("[error]: failed to open X display\n");
-        return false;
-    }
-#ifndef NODEBUG
-    const char *glx_client_extensions = glXGetClientString(display, GLX_EXTENSIONS);
-    puts(glx_client_extensions);
-#endif
-
-    glXSwapIntervalEXT_t glXSwapIntervalEXT = 
-        (glXSwapIntervalEXT_t)glXGetProcAddress((const GLubyte*)"glXSwapIntervalEXT");
-    if (glXSwapIntervalEXT == nullptr) {
-        printf("[error]: glXSwapIntervalEXT not found\n");
-
-        return false;
-    }
-
-    GLXDrawable drawable = glXGetCurrentDrawable();
-
-    glXSwapIntervalEXT(display, drawable, enabled ? 1 : 0);
-
-    return true;
-}
-
+static inline
 std::string read_file(char const* const path) {
 
     // Open the file using ifstream
@@ -71,26 +66,97 @@ std::string read_file(char const* const path) {
     return buffer.str();
 }
 
-static
-raii::Shader compile_shader(std::string const& src, GLenum const type) {
-    raii::Shader shader(type);
+static inline
+GLint compile_shader(std::string const& src, GLenum const type, char const* filename = "") {
+    GLint shader = glCreateShader(type);
     GLint success;
     std::vector<GLchar> program_log(1024, 0);
-    auto source_ptr = src.c_str();  
+    auto source_ptr = src.c_str();
     auto source_len = src.size();
     glShaderSource(shader, 1, reinterpret_cast<GLchar const**>(&source_ptr), reinterpret_cast<GLint const*>(&source_len));
     glCompileShader(shader);
     glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
     if (!success) {
         glGetShaderInfoLog(shader, program_log.size(), nullptr, program_log.data());
-        printf("[error]: %s\n", program_log.data());
+        printf("[error]: %s: %s\n", filename, program_log.data());
         return 0;
     }
     return shader;
 }
 
-static
-raii::Shader shader_from_file(char const* filename, GLenum const type) {
+static inline
+GLint shader_from_file(char const* filename, GLenum const type) {
     auto const source = read_file(filename);
-    return compile_shader(source, type);
+    return compile_shader(source, type, filename);
+}
+
+// static inline
+// GLint create_program(char const* const vertex_shader_path, char const* const fragment_shader_path) {
+//     // shaders:
+    
+//     GLuint program = glCreateProgram();
+//     GLint vertex_shader   = shader_from_file(vertex_shader_path,   GL_VERTEX_SHADER);
+//     GLint fragment_shader = shader_from_file(fragment_shader_path, GL_FRAGMENT_SHADER);
+//     if (!vertex_shader || !fragment_shader)
+//         return 5;
+
+//     glAttachShader(program, vertex_shader);
+//     glAttachShader(program, fragment_shader);
+//     glLinkProgram(program);
+
+//     {
+//         GLint result;
+//         glGetProgramiv(program, GL_LINK_STATUS, &result);
+//         if (!result) {
+//             std::vector<GLchar> program_log(1024, 0);
+//             glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
+//             printf("[error]: %s\n", program_log.data());
+//             return 6;
+//         }
+//         glValidateProgram(program);
+//         glGetProgramiv(program, GL_LINK_STATUS, &result);
+//         if (!result) {
+//             std::vector<GLchar> program_log(1024, 0);
+//             glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
+//             printf("[error]: %s\n", program_log.data());
+//             return 7;
+//         }
+//     }
+//     return program;
+// }
+
+static inline
+FullProgram create_program_from_path(char const* const vertex_shader_src_path, char const* const geometry_shader_src_path, char const* const fragment_shader_src_path) {
+    GLint program         = glCreateProgram();
+    GLint fragment_shader = shader_from_file(fragment_shader_src_path, GL_FRAGMENT_SHADER);
+    GLint geometry_shader = geometry_shader_src_path != nullptr ? shader_from_file(geometry_shader_src_path, GL_GEOMETRY_SHADER) : 0;
+    GLint vertex_shader   = shader_from_file(vertex_shader_src_path,   GL_VERTEX_SHADER);
+
+    glAttachShader(program, vertex_shader);
+    if (geometry_shader_src_path != nullptr)
+        glAttachShader(program, geometry_shader);
+    glAttachShader(program, fragment_shader);
+    glLinkProgram(program);
+
+    GLint result;
+    glGetProgramiv(program, GL_LINK_STATUS, &result);
+    if (!result) {
+        std::vector<GLchar> program_log(1024, 0);
+        glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
+        printf("[error]: %s\n", program_log.data());
+        return {0};
+    }
+    glValidateProgram(program);
+    glGetProgramiv(program, GL_VALIDATE_STATUS, &result);
+    if (!result) {
+        std::vector<GLchar> program_log(1024, 0);
+        glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
+        printf("[error]: %s\n", program_log.data());
+        return {0};
+    }
+    return {
+        .program         = program,
+        .vertex_shader   = vertex_shader,
+        .fragment_shader = fragment_shader,
+    };
 }

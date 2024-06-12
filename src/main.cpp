@@ -1,202 +1,435 @@
 // main logic of the program
-
-#define NODEBUG
-
+// #define DEBUG_OUTPUT
+// #define DEBUG_FPS
 #include <cstdio>
-#include <cstdint>
-#include <cassert>
-#include <cstring>
 #include <string>
 #include <vector>
 #include <thread>
 #include <filesystem>
-#include <fstream>
-#include <unistd.h>
 #include <ros/ros.h>
-#include <sensor_msgs/PointCloud2.h>
 #include "gl.h"
 #include "gl_tools.hpp"
-#include "utils.hpp"
-#include "raii.cpp"
+#include "functional.hpp"
 #include "global_config.hpp"
 #include "ros_event_loop.hpp"
+#include "text.hpp"
+#include <initializer_list>
+#include <ctime>
 
-void error_callback(int, const char* err_str) {
-    printf("GLFW Error: %s\n", err_str);
+static
+size_t constexpr UNIFORM_COUNT = 4;
+static
+size_t constexpr TEXTURE_UNIT_COUNT = 4;
+
+std::timespec last_update = {0};
+
+#include "types.hpp"
+
+static
+PersistentRenderState refresh_render_state(PersistentRenderState state);
+
+static
+void error_callback(int, const char *err_str) {
+    std::printf("GLFW Error: %s\n", err_str);
 }
 
 namespace fs = std::filesystem;
 std::string binary_path = fs::canonical("/proc/self/exe").parent_path();
+
 static
-int x_error_handler(Display* display, XErrorEvent* event) {
-    puts("a");
-    return 0;
+PrivateRenderData private_render_data;
+ExposedRenderData shared_render_data = {nullptr};  // state of the GL thread exposed to other threads
+
+// window redraw callback, do not call directly, use draw_point_cloud instead
+// assumes private render data contains all relevant correct data and *only draws (based on) said data to the screen*
+static
+void draw_window(GLFWwindow *window) {
+    glfwMakeContextCurrent(window);
+    // clear screen
+    glClearColor(.1f, .1f, .1f, 5.f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    private_render_data.point_cloud.draw();
+    private_render_data.perimeter.draw();
+
+    for (auto const& maybe_drawable: private_render_data.drawables)
+        if (maybe_drawable.has_value())
+            maybe_drawable.value().draw();
+
+    glfwSwapBuffers(window);
 }
 
-ExposedRenderData shared_render_data;  // state of the GL thread exposed to other threads
-
-int main(int argc, char** const argv) {
-    ros::init(argc, argv, "radix_node");
+std::optional<GLFWwindow *> create_context() {
     // initialize OpenGL
-    int status = 0;
     glfwSetErrorCallback(error_callback);
-    raii::GLFW glfw{};
+    auto const glfw = glfwInit();
     if (glfw != GLFW_TRUE) {
-        puts("failed to initialize glfw");
-        return 1;
+        std::puts("failed to initialize glfw");
+        return std::nullopt;
     }
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
-    raii::Window window = raii::Window(WIDTH, HEIGHT, "Radix", nullptr, nullptr);
-    if (!static_cast<GLFWwindow*>(window)) {
-        puts("failed to create a window");
-        return 2;
+    auto const window = glfwCreateWindow(WIDTH, HEIGHT, "Radix", nullptr, nullptr);
+    if (!window) {
+        std::puts("failed to create a window");
+        return std::nullopt;
     }
+    glfwSetInputMode(window, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
 
     // start ros-related thread
-    std::thread ros_thread = std::thread([&]{ros_event_loop(argc, argv, window);});
 
     // continue configuration of window/context
-    int frame_buffer_width, frame_buffer_height;
-    glfwGetFramebufferSize(window, &frame_buffer_width, &frame_buffer_height);
-
     glfwMakeContextCurrent(window);
+    return window;
+}
+
+struct Programs {
+    FullProgram point_cloud, perimeter, text;
+};
+
+Programs init_programs() {
+    auto const point_cloud_vertex_shader_path = binary_path + "/point_cloud_vertex.glsl";
+    auto const point_cloud_geometry_shader_path = binary_path + "/point_cloud_geometry.glsl";
+    auto const point_cloud_fragment_shader_path = binary_path + "/point_cloud_fragment.glsl";
+    auto const perimeter_vertex_shader_path = binary_path + "/perimeter_vertex.glsl";
+    auto const perimeter_fragment_shader_path = binary_path + "/perimeter_fragment.glsl";
+    auto const text_vertex_shader_path = binary_path + "/text_vertex.glsl";
+    auto const text_fragment_shader_path = binary_path + "/text_fragment.glsl";
+    FullProgram const point_cloud_program = create_program_from_path(point_cloud_vertex_shader_path.c_str(),
+                                                                    point_cloud_geometry_shader_path.c_str(),
+                                                                     point_cloud_fragment_shader_path.c_str());
+    FullProgram const perimeter_program = create_program_from_path(perimeter_vertex_shader_path.c_str(),
+                                                                    nullptr,
+                                                                   perimeter_fragment_shader_path.c_str());
+    FullProgram const text_program = create_program_from_path(text_vertex_shader_path.c_str(),
+                                                                    nullptr,
+                                                              text_fragment_shader_path.c_str());
+    return Programs{
+            .point_cloud = point_cloud_program,
+            .perimeter = perimeter_program,
+            .text = text_program,
+    };
+}
+
+struct CharsetGenerator {
+    FT_Library library;
+    FT_Face face;
+};
+
+std::optional<CharsetGenerator> init_charset_generator(char const *const type_face_path) {
+    FT_Library library;
+    FT_Face face;
+
+    if (FT_Init_FreeType(&library))
+        return std::nullopt;
+
+    if (FT_New_Face(library, type_face_path, 0, &face))
+        return std::nullopt;
+
+    return CharsetGenerator{library, face};
+}
+
+template<int N, int M>
+Charset<M - N> create_charsets(CharsetGenerator const &generator, FT_UInt const em_height) {
+    FT_Set_Pixel_Sizes(generator.face, 0, em_height);
+    return load_charset<N, M>(generator.face);
+}
+
+int main(int argc, char **const argv) {
+    ros::init(argc, argv, "radix_node");
+
 #ifndef NODEBUG
-    printf("vendor:   %s\n", reinterpret_cast<char const*>(glGetString(GL_VENDOR)));
-    printf("renderer: %s\n", reinterpret_cast<char const*>(glGetString(GL_RENDERER)));
+    std::printf("vendor:   %s\n", reinterpret_cast<char const *>(glGetString(GL_VENDOR)));
+    std::printf("renderer: %s\n", reinterpret_cast<char const *>(glGetString(GL_RENDERER)));
 #endif
 
-    glewExperimental = GL_TRUE;
-
-    if (glewInit() != GLEW_OK) {
-        puts("failed to init glew");
-        return 3;
+    GLFWwindow *window = nullptr;
+    if (auto const maybe_window = create_context(); maybe_window.has_value())
+        window = maybe_window.value();
+    else {
+        std::puts("failed to init glfw window.");
+        return -1;
     }
 
-    glViewport(0, 0, frame_buffer_width, frame_buffer_height);
+    glewExperimental = GL_TRUE;
+    if (glewInit() != GLEW_OK) {
+        std::puts("failed to init glew.");
+        return -1;
+    }
 
-    // todo-perf: compute shader to expand compressed version of the data
-    // buffers:
-    raii::VAO vao{};
-    std::array<GLBufferObject, 2> vbos;
-    for (auto& vbo : vbos) {
+    std::thread ros_thread = std::thread([&] { ros_event_loop(argc, argv, window); });
+
+    // configure the perimeter render data because it is handled asynchronously
+    GLuint point_cloud_vao, perimeter_vao, perimeter_vbo;
+    glGenVertexArrays(1, &perimeter_vao);
+    glGenBuffers(1, &perimeter_vbo);
+
+    glGenVertexArrays(1, &point_cloud_vao);
+    std::array<GLBufferObject, 2> vbos{0};
+    for (auto &vbo: vbos) {
         glGenBuffers(1, &vbo.vbo);
         vbo.vertex_count = 0;
     }
 
-    glBindVertexArray(vao);                                                       // bind configuration object: remembers the global (buffer) state
-        // glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           // bind the buffer to the slot for how it will be used
-        // glBufferData(GL_ARRAY_BUFFER, sizeof(verticies), verticies, GL_STATIC_DRAW);  // send data to the gpu (with usage hints)
-        // glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
-        // glEnableVertexAttribArray(0);                                                 // enable the config
-    glBindVertexArray(0);                                                         // unbinding the buffers (safety?)
-
     // shaders:
-    auto const vertex_shader_path   = binary_path + "/vertex.glsl";
-    auto const fragment_shader_path = binary_path + "/fragment.glsl";
-    raii::Program program{};
-    raii::Shader vertex_shader   = shader_from_file(vertex_shader_path.c_str(),   GL_VERTEX_SHADER);
-    raii::Shader fragment_shader = shader_from_file(fragment_shader_path.c_str(), GL_FRAGMENT_SHADER);
-    if (!vertex_shader || !fragment_shader)
-        return 5;
-
-    glAttachShader(program, vertex_shader);
-    glAttachShader(program, fragment_shader);
-    glLinkProgram(program);
-
-    {
-        GLint result;
-        glGetProgramiv(program, GL_LINK_STATUS, &result);
-        if (!result) {
-            std::vector<GLchar> program_log(1024, 0);
-            glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
-            printf("[error]: %s\n", program_log.data());
-            return 6;
-        }
-        glValidateProgram(program);
-        glGetProgramiv(program, GL_LINK_STATUS, &result);
-        if (!result) {
-            std::vector<GLchar> program_log(1024, 0);
-            glGetProgramInfoLog(program, program_log.size(), nullptr, program_log.data());
-            printf("[error]: %s\n", program_log.data());
-            return 7;
-        }
-    }
-
-    GLint const x_max_uniform_handle = glGetUniformLocation(program, "x_max");
-    GLint const y_max_uniform_handle = glGetUniformLocation(program, "x_max");
-
+    auto const programs = init_programs();
     // enable vsync if present:
-    set_vsync(true);
+    // set_vsync(true);
+    auto const charset_generator_maybe = init_charset_generator(
+            "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSans.ttf");
+    if (!charset_generator_maybe.has_value())
+        return -1;
+    auto const &charset_generator = charset_generator_maybe.value();
+    auto small_charset = create_charsets<0, 128>(charset_generator, 52);
 
     using namespace std::chrono_literals;
-    auto constexpr target_frametime = (1000000us)/global_base_rate;
-    auto t0 = std::chrono::steady_clock::now();
-    auto sleep_duration_adjustment = 0us;
-    bool data_is_loaded = false;
+    auto constexpr target_frametime = (1000000us) / global_base_rate;
     configure_features();
-    size_t triangle_count = 0;
-    uint_fast8_t current_active_buffer_id = 0;
-    while (!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
+    TextRenderResource text_rendering_resource = {
+            .program = programs.text,
+            .sampler_uniform_location = glGetUniformLocation(programs.text.program, "text_bitmap"),
+            .pitch_uniform_location = glGetUniformLocation(programs.text.program, "pitch"),
+            .small_charset = small_charset,
+    };
+    glGenVertexArrays(1, &text_rendering_resource.vao);
 
-        glBindVertexArray(vao);
+    PersistentRenderState render_state{
+            .sleep_duration_adjustment = 0us,
+            .target_frame_time = target_frametime,
+            .perimeter_vao = perimeter_vao,
+            .perimeter_vbo = perimeter_vbo,
+            .point_cloud_vao = point_cloud_vao,
+            .point_cloud_program = programs.point_cloud,
+            .perimeter_program = programs.perimeter,
+            .window = window,
+            .click_points = {},
+            .objects_for_cleanup = {},
+            .left_mouse_was_pressed = false,
+            .vertex_buffer_objects = vbos,
+            .t0 = std::chrono::steady_clock::now(),
+            .current_active_buffer_id = 0,
+            .text_rendering_resource = text_rendering_resource,
+    };
+    glfwSetWindowRefreshCallback(window, draw_window);
+    while (!glfwWindowShouldClose(window))
+        render_state = refresh_render_state(std::move(render_state));
 
-        // GL buffer id of buffer with data being streamed in, in a background context
-        uint_fast8_t const current_inactive_buffer_id = current_active_buffer_id ? 0 : 1;
-        auto const current_active_buffer = [&]() -> GLBufferObject& { return vbos[current_active_buffer_id]; };
-        // bool compare_exchange_weak( T& expected, T desired,
-        //                             std::memory_order success,
-        //                             std::memory_order failure ) noexcept;
-        GLBufferObject* null = nullptr;
-        auto const buffer_swap_success = shared_render_data.inactive_buffer.compare_exchange_weak(
+    clock_gettime(CLOCK_MONOTONIC, &last_update);
+    for (auto &vbo: vbos)
+        glDeleteBuffers(1, &vbo.vbo);
+
+    glfwTerminate();
+    return 0;
+}
+
+#define UPDATE_INTERVAL 33333
+
+static
+PersistentRenderState refresh_render_state(PersistentRenderState state) {
+    bool should_redraw = false;
+    std::timespec current_time;
+    clock_gettime(CLOCK_MONOTONIC, &current_time);
+    auto elapsed_time_ns = (current_time.tv_sec - last_update.tv_sec)*1000*1000*1000 + (current_time.tv_nsec - last_update.tv_nsec);
+    auto time_to_wait_for = UPDATE_INTERVAL - (elapsed_time_ns / 1000);
+    if ((time_to_wait_for > 0) && (time_to_wait_for < UPDATE_INTERVAL))
+    	usleep(time_to_wait_for);
+    clock_gettime(CLOCK_MONOTONIC, &last_update);
+
+    //printf("%ld\n", time_to_wait_for);
+
+    private_render_data.drawables.clear();
+    // bool should_redraw = false;
+    glfwPollEvents();
+    bool const left_mouse_is_pressed = glfwGetMouseButton(state.window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    if (left_mouse_is_pressed && (!state.left_mouse_was_pressed)) {
+        should_redraw |= true; // update perimeter display click points due to iterator invalidation setup draw info
+        auto cursor_pos = get_cursor_pos(state.window);
+        state.click_points.push_back(cursor_pos);
+        DrawCallInfo draw_info = {0};// = private_render_data.perimeter_draw_info;
+        draw_info.vao = state.perimeter_vao;
+        glBindVertexArray(draw_info.vao);
+        glBindBuffer(GL_ARRAY_BUFFER, state.perimeter_vbo);
+        GLuint const vertex_count = state.click_points.size();
+        GLuint const required_buffer_size = sizeof(state.click_points[0]) * vertex_count;
+        glBufferData(GL_ARRAY_BUFFER, required_buffer_size, state.click_points.data(), GL_STATIC_DRAW);
+
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+        glEnableVertexAttribArray(0);
+
+        auto const vertex_count_for_drawing = vertex_count;
+        draw_info = {
+                .vao = draw_info.vao,
+                .program = state.perimeter_program.program,
+                .draw_mode = GL_LINE_LOOP,
+                .vertex_offset = 0,
+                .vertex_count = vertex_count_for_drawing,
+        };
+        private_render_data.drawables.emplace_back(draw_info);
+        glBindVertexArray(0);
+    }
+    state.left_mouse_was_pressed = left_mouse_is_pressed;
+
+    // GL buffer id of buffer with data being streamed in, in a background context
+    uint_fast8_t const current_inactive_buffer_id = state.current_active_buffer_id ? 0 : 1;
+    auto const current_active_buffer = [&]() -> GLBufferObject & { return state.vertex_buffer_objects[state.current_active_buffer_id]; };
+
+    GLBufferObject *null = nullptr;
+    auto const buffer_swap_success = shared_render_data.inactive_buffer.compare_exchange_weak(
             null, &current_active_buffer(),
             std::memory_order_acq_rel,
             std::memory_order_consume);
 
-        if (buffer_swap_success)
-            current_active_buffer_id = current_inactive_buffer_id;
+    if (buffer_swap_success) {
+        should_redraw |= true;
+        state.current_active_buffer_id = current_inactive_buffer_id;
 
         // ----------- drawing -----------
-        // clear screen
-        glClearColor(.1f, .1f, .1f, 5.f);
-        glClear(GL_COLOR_BUFFER_BIT);   
-        // pass data to the gpu to be able to perform compute
-        glBindVertexArray(vao);
-        glUseProgram(program);
+        glBindVertexArray(state.point_cloud_vao);
         glBindBuffer(GL_ARRAY_BUFFER, current_active_buffer().vbo);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);                        // configure vbo metadata
-        glEnableVertexAttribArray(0);                                                 // enable the config
-        glDrawArrays(GL_TRIANGLES, 0, current_active_buffer().vertex_count);          // draw call
-        glfwSwapBuffers(window);
-        // logic time end
-        auto const t1 = std::chrono::steady_clock::now();
-        auto const logic_time = std::chrono::duration_cast<std::chrono::microseconds>(t1-t0);
-        // adjustment is divided by 2 as a heuristic (avoid large +/- swings, effectively P from PID with factor of .5)
-        auto const time_to_sleep_for = target_frametime - logic_time + (sleep_duration_adjustment/2);
-        // max prevents underflow
-        usleep(max(static_cast<int64_t>(0), std::chrono::duration_cast<std::chrono::microseconds>(time_to_sleep_for).count()));
-        // end of frame time (printing is not included, *though it should be*)
-        auto const t2 = std::chrono::steady_clock::now();
-        auto const frametime = std::chrono::duration_cast<std::chrono::microseconds>(t2-t0);
-        sleep_duration_adjustment    = target_frametime-frametime;
-#ifndef NODEBUG
-        printf("vbo handle: %d\n", current_active_buffer().vbo);
-        printf("tri_count:  %zu\n", triangle_count);
-        printf("logic_time: %li us\n", logic_time.count());
-        printf("frame_time: %li us\n", frametime.count());
-        printf("adjustment: %li us\n", sleep_duration_adjustment.count());
-        printf("fps:        %li\n", 1000000/frametime.count());
-        printf("---------------------\n");
-#endif
-        t0 = t2;
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, nullptr);  // configure point_cloud_vbo metadata
+        glEnableVertexAttribArray(0);                           // enable the config
+        private_render_data.drawables.emplace_back(DrawCallInfo{
+                .vao = state.point_cloud_vao,
+                .program = state.point_cloud_program.program,
+                .draw_mode = GL_LINES_ADJACENCY,
+                .vertex_offset = 0,
+                .vertex_count = static_cast<GLuint>(current_active_buffer().vertex_count),
+                .uniform_count = 0,
+                .texture_unit_count = 0,
+        });
+        glBindVertexArray(0);
     }
 
-    for (auto& vbo : vbos)
-        glDeleteBuffers(1, &vbo.vbo);
+    // text rendering
+    for (auto const &entity: state.objects_for_cleanup) {
+        glDeleteVertexArrays(1, &entity.vao);
+        glDeleteBuffers(1, &entity.vbo);
+    }
+    state.objects_for_cleanup.clear();
 
-    return 0;
+    auto const render_character_bitmap = [text_rendering_resource = state.text_rendering_resource](
+            Bitmap const &bitmap,
+            auto const left,
+            auto const top,
+            auto const right,
+            auto const bottom) -> std::pair<DrawCallInfo, DrawCallCleanupInfo> {
+        // freetype suggestions:
+        // - linear blending
+        // - bitmap is applied to alpha
+        auto const r = text_rendering_resource;
+        GLuint vao, vbo;
+
+        glGenVertexArrays(1, &vao);
+        glBindVertexArray(vao);
+
+        glGenBuffers(1, &vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+        glUseProgram(r.program.program);
+        float billboard[] = {
+                left, top, 0.f, 1.f,
+                left, bottom, 0.f, 0.f,
+                right, top, 1.f, 1.f,
+                right, top, 1.f, 1.f,
+                right, bottom, 1.f, 0.f,
+                left, bottom, 0.f, 0.f,
+        };
+        glBufferData(GL_ARRAY_BUFFER, sizeof(billboard), &billboard, GL_STREAM_DRAW);
+        glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
+        glEnableVertexAttribArray(0);
+
+        return std::pair<DrawCallInfo, DrawCallCleanupInfo>{
+                DrawCallInfo{
+                        .vao = vao,
+                        .program = text_rendering_resource.program.program,
+                        .draw_mode = GL_TRIANGLES,
+                        .vertex_offset = 0,
+                        .vertex_count = 6,
+                        .uniform_count = 2,
+                        .texture_unit_count = 1,
+                        .uniforms = {
+                                UniformConfig{
+                                        .type = UniformConfig::UniformType::Integer1,
+                                        .location = r.sampler_uniform_location,
+                                        .value = {
+                                                .integer = 0,
+                                        },
+                                },
+                                UniformConfig{
+                                        .type = UniformConfig::UniformType::Integer1,
+                                        .location = r.pitch_uniform_location,
+                                        .value = {
+                                                .integer = bitmap.pitch,
+                                        },
+                                },
+                        },
+                        .texture_units = {
+                                bitmap.texture,
+                        },
+                },
+                DrawCallCleanupInfo{
+                        .vao = vao,
+                        .vbo = vbo
+                }
+        };
+    };
+
+    // clean up all the objects no longer in use
+    for (auto const &object: state.objects_for_cleanup) {
+        glDeleteVertexArrays(1, &object.vao);
+        glDeleteBuffers(1, &object.vbo);
+    }
+    state.objects_for_cleanup.clear();
+
+    char constexpr text[] = "POSITIONING";
+    auto top = -.8f;
+    auto left = -.2f;
+    int window_width, window_height;
+    glfwGetWindowSize(state.window, &window_width, &window_height);
+
+    auto const pixel_size = 2.f / static_cast<float>(window_height);
+    for (int i = 0; i < sizeof(text) - 1; i++) {
+        auto const c = text[i];
+        auto const optional_bitmap = state.text_rendering_resource.small_charset.bitmap[c];
+        if (optional_bitmap.has_value()) {
+            auto const bitmap = optional_bitmap.value();
+            auto const width = static_cast<float>(bitmap.width) * pixel_size;
+            auto const height = static_cast<float>(bitmap.height) * pixel_size;
+            auto const local_left = left; // + bitmap.left * pixel_size;
+            auto const local_top = top; // + bitmap.top * pixel_size;
+            auto [render_info, cleanup_info] = render_character_bitmap(bitmap, local_left, local_top, local_left + width, local_top + height);
+            private_render_data.drawables.emplace_back(render_info);
+            state.objects_for_cleanup.emplace_back(cleanup_info);
+            left += width+2*pixel_size;
+        }
+    }
+
+    if (should_redraw)
+        draw_window(state.window);
+
+    // // logic time end
+    // auto const t1 = std::chrono::steady_clock::now();
+    // auto const logic_time = std::chrono::duration_cast<std::chrono::microseconds>(t1-state.t0);
+    // // adjustment is divided by 2 as a heuristic (avoid large +/- swings, effectively P from PID with factor of .5)
+    // auto const time_to_sleep_for = state.target_frame_time - logic_time + (state.sleep_duration_adjustment/2);
+    // // max prevents underflow
+    // usleep(max(static_cast<int64_t>(0), std::chrono::duration_cast<std::chrono::microseconds>(time_to_sleep_for).count()));
+    // // end of frame time (printing is not included, *though it should be*)
+    // auto const t2 = std::chrono::steady_clock::now();
+    // auto const frametime = std::chrono::duration_cast<std::chrono::microseconds>(t2-state.t0);
+    // state.sleep_duration_adjustment = state.target_frame_time-frametime;
+#ifdef DEBUG_FPS
+    printf("vbo handle: %d\n", current_active_buffer().vbo);
+    printf("tri_count:  %zu\n", triangle_count);
+    printf("logic_time: %li us\n", logic_time.count());
+    printf("frame_time: %li us\n", frametime.count());
+    printf("adjustment: %li us\n", sleep_duration_adjustment.count());
+    printf("fps:        %li\n", 1000000/frametime.count());
+    printf("---------------------\n");
+#endif
+    // state.t0 = t2;
+    return state;
 }

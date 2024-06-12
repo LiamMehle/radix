@@ -41,7 +41,7 @@ void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
         // 3 floats/point
         // 3 points/triangle
         // 2 triangles/input point except for top row and left column
-        auto const vertex_count = 3*2*((height)*(width-1) + (width));
+        auto const vertex_count = 4*((height)*(width-1) + (width));
         auto const float_count = 3*vertex_count;
 
         GLint buffer_size;
@@ -72,12 +72,12 @@ void update_point_cloud(sensor_msgs::PointCloud2 const& cloud_msg) {
                 auto const bot_right = point_at(row2, col2);
 
                 // triangle array is 1 element narrower and 1 element shorter than points
-                Vertex* __restrict__ point_cloud_iteration_ptr = &buffer[3*2*((i)*(width-1) + (j))];
+                Vertex* __restrict__ point_cloud_iteration_ptr = &buffer[4*(i*(width-1) + j)];
 
                 *point_cloud_iteration_ptr++ = to_vertex(top_left);
                 *point_cloud_iteration_ptr++ = to_vertex(top_right);
-                *point_cloud_iteration_ptr++ = to_vertex(bot_left);
-                *point_cloud_iteration_ptr++ = to_vertex(top_right);
+                //*point_cloud_iteration_ptr++ = to_vertex(bot_left);
+                //*point_cloud_iteration_ptr++ = to_vertex(top_right);
                 *point_cloud_iteration_ptr++ = to_vertex(bot_right);
                 *point_cloud_iteration_ptr++ = to_vertex(bot_left);
             }

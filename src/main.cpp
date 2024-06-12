@@ -294,7 +294,7 @@ PersistentRenderState refresh_render_state(PersistentRenderState state) {
         private_render_data.drawables.emplace_back(DrawCallInfo{
                 .vao = state.point_cloud_vao,
                 .program = state.point_cloud_program.program,
-                .draw_mode = GL_TRIANGLES,
+                .draw_mode = GL_LINES_ADJACENCY,
                 .vertex_offset = 0,
                 .vertex_count = static_cast<GLuint>(current_active_buffer().vertex_count),
                 .uniform_count = 0,

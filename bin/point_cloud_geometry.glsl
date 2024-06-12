@@ -1,7 +1,7 @@
 #version 330 core
 
-layout (triangles) in;
-layout (triangle_strip, max_vertices=3) out;
+layout (lines_adjacency) in;
+layout (triangle_strip, max_vertices=6) out;
 in float heights[];
 out float height;
 
@@ -19,10 +19,10 @@ vec3 vertex3_at(int idx) {
     return vertex_at(idx).xyz;
 }
 
-void main() {
-    vec3 edge1 = normalize(vertex3_at(1) - vertex3_at(0));
-    vec3 edge2 = normalize(vertex3_at(2) - vertex3_at(0));
-    vec3 edge3 = normalize(vertex3_at(1) - vertex3_at(2));
+void process_tri(int a, int b, int c) {
+    vec3 edge1 = normalize(vertex3_at(b) - vertex3_at(a));
+    vec3 edge2 = normalize(vertex3_at(c) - vertex3_at(a));
+    vec3 edge3 = normalize(vertex3_at(b) - vertex3_at(c));
     vec3 lengths = vec3(
         abs(dot(edge1, edge2)),
         abs(dot(edge1, edge3)),
@@ -33,8 +33,13 @@ void main() {
     if (is_splinter)
         return;
 
-    copy_vertex(0);
-    copy_vertex(1);
-    copy_vertex(2);
+    copy_vertex(a);
+    copy_vertex(b);
+    copy_vertex(c);
     EndPrimitive();
+}
+
+void main() {
+	process_tri(0, 1, 2);
+	process_tri(0, 2, 3);
 }
